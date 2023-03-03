@@ -150,6 +150,13 @@ pub enum Error {
         source: TableError,
     },
 
+    #[snafu(display("Failed to flush table: {}, source: {}", table_name, source))]
+    FlushTable {
+        table_name: String,
+        #[snafu(backtrace)]
+        source: TableError,
+    },
+
     #[snafu(display("Failed to start server, source: {}", source))]
     StartServer {
         #[snafu(backtrace)]
@@ -437,6 +444,7 @@ impl ErrorExt for Error {
                 source.status_code()
             }
             DropTable { source, .. } => source.status_code(),
+            FlushTable { source, .. } => source.status_code(),
 
             Insert { source, .. } => source.status_code(),
             Delete { source, .. } => source.status_code(),

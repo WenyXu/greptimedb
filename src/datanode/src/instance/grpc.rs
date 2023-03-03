@@ -98,7 +98,7 @@ impl Instance {
             DdlExpr::Alter(expr) => self.handle_alter(expr).await,
             DdlExpr::CreateDatabase(expr) => self.handle_create_database(expr, query_ctx).await,
             DdlExpr::DropTable(expr) => self.handle_drop_table(expr).await,
-            DdlExpr::FlushTable(_) => todo!(),
+            DdlExpr::FlushTable(expr) => self.hanlde_flush_table(expr).await,
         }
     }
 }
@@ -128,18 +128,19 @@ mod test {
     use api::v1::column::{SemanticType, Values};
     use api::v1::{
         alter_expr, AddColumn, AddColumns, AlterExpr, Column, ColumnDataType, ColumnDef,
-        CreateDatabaseExpr, CreateTableExpr, QueryRequest,
+        CreateDatabaseExpr, CreateTableExpr, FlushTableExpr, QueryRequest,
     };
     use common_recordbatch::RecordBatches;
     use datatypes::prelude::*;
     use session::context::QueryContext;
 
     use super::*;
-    use crate::tests::test_util::{self, MockInstance};
+    use crate::tests::test_util::{self, has_parquet_file, test_region_dir, MockInstance};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_handle_ddl() {
         let instance = MockInstance::new("test_handle_ddl").await;
+        let data_tmp_dir = instance.data_tmp_dir();
         let instance = instance.inner();
 
         let query = GrpcRequest::Ddl(DdlRequest {
@@ -207,6 +208,43 @@ mod test {
             .await
             .unwrap();
         assert!(matches!(output, Output::AffectedRows(1)));
+
+        // Trigger flush
+        let query = GrpcRequest::Ddl(DdlRequest {
+            expr: Some(DdlExpr::FlushTable(FlushTableExpr {
+                catalog_name: "greptime".to_string(),
+                schema_name: "my_database".to_string(),
+                table_name: "my_table".to_string(),
+                region_id: None,
+            })),
+        });
+
+        let table_id = 1024;
+        let region_id = 0;
+        let region_dir = test_region_dir(
+            data_tmp_dir.path().to_str().unwrap(),
+            "greptime",
+            "my_database",
+            table_id,
+            region_id,
+        );
+
+        assert!(!has_parquet_file(&region_dir));
+
+        let output = instance
+            .do_query(query.clone(), QueryContext::arc())
+            .await
+            .unwrap();
+        assert!(matches!(output, Output::AffectedRows(0)));
+
+        // Wait for the previous finished
+        let output = instance
+            .do_query(query.clone(), QueryContext::arc())
+            .await
+            .unwrap();
+        assert!(matches!(output, Output::AffectedRows(0)));
+
+        assert!(has_parquet_file(&region_dir));
 
         let output = instance
             .execute_sql(

@@ -19,3 +19,39 @@ mod mock_engine;
 pub use empty_table::EmptyTable;
 pub use memtable::MemTable;
 pub use mock_engine::MockTableEngine;
+
+#[inline]
+fn region_name(table_id: u32, n: u32) -> String {
+    format!("{table_id}_{n:010}")
+}
+
+#[inline]
+fn table_dir(catalog_name: &str, schema_name: &str, table_id: u32) -> String {
+    format!("{catalog_name}/{schema_name}/{table_id}")
+}
+
+pub fn test_region_dir(
+    dir: &str,
+    catalog_name: &str,
+    schema_name: &str,
+    table_id: u32,
+    region_id: u32,
+) -> String {
+    let table_dir = table_dir(catalog_name, schema_name, table_id);
+    let region_name = region_name(table_id, region_id);
+
+    format!("{}/{}/{}", dir, table_dir, region_name)
+}
+
+pub fn has_parquet_file(sst_dir: &str) -> bool {
+    for entry in std::fs::read_dir(sst_dir).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if !path.is_dir() {
+            assert_eq!("parquet", path.extension().unwrap());
+            return true;
+        }
+    }
+
+    false
+}

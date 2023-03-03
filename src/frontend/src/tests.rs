@@ -56,9 +56,21 @@ pub(crate) struct MockDistributedInstance {
     _guards: Vec<TestGuard>,
 }
 
+impl MockDistributedInstance {
+    pub fn data_tmp_dirs(&self) -> Vec<&TempDir> {
+        self._guards.iter().map(|g| &g._data_tmp_dir).collect()
+    }
+}
+
 pub(crate) struct MockStandaloneInstance {
     pub(crate) instance: Arc<Instance>,
     _guard: TestGuard,
+}
+
+impl MockStandaloneInstance {
+    pub fn data_tmp_dir(&self) -> &TempDir {
+        &self._guard._data_tmp_dir
+    }
 }
 
 pub(crate) async fn create_standalone_instance(test_name: &str) -> MockStandaloneInstance {

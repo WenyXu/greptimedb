@@ -199,6 +199,14 @@ pub struct CopyTableRequest {
     pub file_name: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct FlushTableRequest {
+    pub catalog_name: String,
+    pub schema_name: String,
+    pub table_name: String,
+    pub region_id: Option<u32>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
