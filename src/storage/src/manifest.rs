@@ -14,6 +14,7 @@
 
 //! manifest storage
 pub(crate) mod action;
+pub use action::table::*;
 pub mod checkpoint;
 pub mod helper;
 mod impl_;
