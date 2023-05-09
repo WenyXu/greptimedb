@@ -187,6 +187,16 @@ pub struct CloseTableRequest {
     pub table_id: TableId,
 }
 
+impl CloseTableRequest {
+    pub fn table_ref(&self) -> TableReference {
+        TableReference {
+            catalog: &self.catalog_name,
+            schema: &self.schema_name,
+            table: &self.table_name,
+        }
+    }
+}
+
 /// Alter table request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlterTableRequest {

@@ -50,6 +50,13 @@ pub enum Error {
         location: Location,
     },
 
+    #[snafu(display("Failed to close table, table: {}, source: {}", table_name, source))]
+    CloseTable {
+        source: BoxedError,
+        table_name: String,
+        location: Location,
+    },
+
     #[snafu(display(
         "Failed to write table manifest, table: {}, source: {}",
         table_name,
@@ -210,6 +217,7 @@ impl ErrorExt for Error {
             | DecodeJson { .. }
             | ConvertRaw { .. }
             | DropTable { .. }
+            | CloseTable { .. }
             | WriteImmutableManifest { .. }
             | BuildStream { .. }
             | ParquetScanPlan { .. } => StatusCode::Unexpected,

@@ -39,7 +39,8 @@ use table::engine::{
 };
 use table::metadata::{TableInfo, TableVersion};
 use table::requests::{
-    AlterKind, AlterTableRequest, CreateTableRequest, DropTableRequest, OpenTableRequest,
+    AlterKind, AlterTableRequest, CloseTableRequest, CreateTableRequest, DropTableRequest,
+    OpenTableRequest,
 };
 use table::{error as table_error, Result as TableResult, Table, TableRef};
 
@@ -189,6 +190,14 @@ impl<S: StorageEngine> TableEngine for MitoEngine<S> {
         request: DropTableRequest,
     ) -> TableResult<bool> {
         self.inner.drop_table(request).await
+    }
+
+    async fn close_table(
+        &self,
+        _ctx: &EngineContext,
+        request: CloseTableRequest,
+    ) -> TableResult<()> {
+        self.inner.close_table(request).await
     }
 
     async fn close(&self) -> TableResult<()> {
@@ -491,6 +500,26 @@ impl<S: StorageEngine> MitoEngineInner<S> {
             Ok(true)
         } else {
             Ok(false)
+        }
+    }
+
+    async fn close_table(&self, request: CloseTableRequest) -> TableResult<()> {
+        let table_ref = request.table_ref();
+
+        let _lock = self.table_mutex.lock(table_ref.to_string()).await;
+        let removed_table = self.tables.remove(&table_ref.to_string());
+
+        // Close the table to close all regions. Closing a region is idempotent.
+        if let Some((_, table)) = &removed_table {
+            table
+                .close()
+                .await
+                .map_err(BoxedError::new)
+                .context(table_error::TableOperationSnafu)?;
+
+            Ok(())
+        } else {
+            Ok(())
         }
     }
 

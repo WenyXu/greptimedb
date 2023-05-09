@@ -18,9 +18,11 @@ use std::sync::Arc;
 use common_procedure::BoxedProcedure;
 use store_api::storage::RegionId;
 
-use crate::error::Result;
+use crate::error::{self, Result};
 use crate::metadata::TableId;
-use crate::requests::{AlterTableRequest, CreateTableRequest, DropTableRequest, OpenTableRequest};
+use crate::requests::{
+    AlterTableRequest, CloseTableRequest, CreateTableRequest, DropTableRequest, OpenTableRequest,
+};
 use crate::TableRef;
 pub mod manager;
 
@@ -103,6 +105,14 @@ pub trait TableEngine: Send + Sync {
 
     /// Drops the given table. Return true if the table is dropped, or false if the table doesn't exist.
     async fn drop_table(&self, ctx: &EngineContext, request: DropTableRequest) -> Result<bool>;
+
+    /// Closes the given table.
+    async fn close_table(&self, _ctx: &EngineContext, _request: CloseTableRequest) -> Result<()> {
+        error::UnsupportedSnafu {
+            operation: "close_table",
+        }
+        .fail()
+    }
 
     /// Close the engine.
     async fn close(&self) -> Result<()>;

@@ -26,7 +26,9 @@ use snafu::ResultExt;
 use table::engine::{table_dir, EngineContext, TableEngine, TableEngineProcedure, TableReference};
 use table::error::TableOperationSnafu;
 use table::metadata::{TableInfo, TableInfoBuilder, TableMetaBuilder, TableType};
-use table::requests::{AlterTableRequest, CreateTableRequest, DropTableRequest, OpenTableRequest};
+use table::requests::{
+    AlterTableRequest, CloseTableRequest, CreateTableRequest, DropTableRequest, OpenTableRequest,
+};
 use table::{error as table_error, Result as TableResult, Table, TableRef};
 use tokio::sync::Mutex;
 
@@ -34,8 +36,8 @@ use crate::config::EngineConfig;
 use crate::engine::procedure::{self, CreateImmutableFileTable, DropImmutableFileTable};
 use crate::engine::INIT_TABLE_VERSION;
 use crate::error::{
-    BuildTableInfoSnafu, BuildTableMetaSnafu, DropTableSnafu, InvalidRawSchemaSnafu, Result,
-    TableExistsSnafu,
+    BuildTableInfoSnafu, BuildTableMetaSnafu, CloseTableSnafu, DropTableSnafu,
+    InvalidRawSchemaSnafu, Result, TableExistsSnafu,
 };
 use crate::manifest::immutable::{delete_table_manifest, ImmutableMetadata};
 use crate::manifest::table_manifest_dir;
@@ -112,6 +114,18 @@ impl TableEngine for ImmutableFileTableEngine {
             .context(table_error::TableOperationSnafu)
     }
 
+    async fn close_table(
+        &self,
+        _ctx: &EngineContext,
+        request: CloseTableRequest,
+    ) -> TableResult<()> {
+        self.inner
+            .close_table(request)
+            .await
+            .map_err(BoxedError::new)
+            .context(table_error::TableOperationSnafu)
+    }
+
     async fn close(&self) -> TableResult<()> {
         self.inner.close().await
     }
@@ -152,7 +166,16 @@ impl TableEngineProcedure for ImmutableFileTableEngine {
 #[cfg(test)]
 impl ImmutableFileTableEngine {
     pub async fn close_table(&self, table_ref: &TableReference<'_>) -> TableResult<()> {
-        self.inner.close_table(table_ref).await
+        self.inner
+            .close_table(CloseTableRequest {
+                catalog_name: table_ref.catalog.to_string(),
+                schema_name: table_ref.schema.to_string(),
+                table_name: table_ref.table.to_string(),
+                table_id: 0,
+            })
+            .await
+            .map_err(BoxedError::new)
+            .context(table_error::TableOperationSnafu)
     }
 }
 
@@ -397,6 +420,31 @@ impl EngineInner {
         }
     }
 
+    pub async fn close_table(&self, req: CloseTableRequest) -> Result<()> {
+        let table_ref = TableReference {
+            catalog: &req.catalog_name,
+            schema: &req.schema_name,
+            table: &req.table_name,
+        };
+
+        let _lock = self.table_mutex.lock().await;
+
+        let table_full_name = table_ref.to_string();
+        if let Some(table) = self.get_table_by_full_name(&table_full_name) {
+            table
+                .close()
+                .await
+                .map_err(BoxedError::new)
+                .context(CloseTableSnafu {
+                    table_name: &table_full_name,
+                })?;
+        }
+
+        self.tables.write().unwrap().remove(&table_full_name);
+
+        Ok(())
+    }
+
     async fn close(&self) -> TableResult<()> {
         let _lock = self.table_mutex.lock().await;
 
@@ -424,26 +472,5 @@ impl EngineInner {
             &self.object_store,
         )
         .await
-    }
-}
-
-#[cfg(test)]
-impl EngineInner {
-    pub async fn close_table(&self, table_ref: &TableReference<'_>) -> TableResult<()> {
-        let full_name = table_ref.to_string();
-
-        let _lock = self.table_mutex.lock().await;
-
-        if let Some(table) = self.get_table_by_full_name(&full_name) {
-            table
-                .close()
-                .await
-                .map_err(BoxedError::new)
-                .context(table_error::TableOperationSnafu)?;
-        }
-
-        self.tables.write().unwrap().remove(&full_name);
-
-        Ok(())
     }
 }
