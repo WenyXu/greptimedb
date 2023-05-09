@@ -121,6 +121,13 @@ pub enum Error {
         source: BoxedError,
     },
 
+    #[snafu(display("Failed to close table {}, source: {}", table_name, source))]
+    CloseTable {
+        table_name: String,
+        #[snafu(backtrace)]
+        source: BoxedError,
+    },
+
     #[snafu(display("Table engine not found: {}, source: {}", engine_name, source))]
     TableEngineNotFound {
         engine_name: String,
@@ -496,7 +503,7 @@ impl ErrorExt for Error {
             | GetTable { source, .. }
             | AlterTable { source, .. }
             | OpenTable { source, .. } => source.status_code(),
-            DropTable { source, .. } => source.status_code(),
+            DropTable { source, .. } | CloseTable { source, .. } => source.status_code(),
             FlushTable { source, .. } => source.status_code(),
 
             Insert { source, .. } => source.status_code(),

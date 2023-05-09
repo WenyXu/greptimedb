@@ -22,7 +22,7 @@ use common_telemetry::error;
 use snafu::ResultExt;
 use table::engine::manager::TableEngineManagerRef;
 use table::engine::EngineContext;
-use table::requests::{CloseTableRequest, DropTableRequest};
+use table::requests::CloseTableRequest;
 
 use crate::error;
 use crate::error::Result;
@@ -119,6 +119,7 @@ impl CloseTableHandler {
             catalog_name,
             schema_name,
             table_name,
+            table_id,
             ..
         } = &request;
 
@@ -140,16 +141,17 @@ impl CloseTableHandler {
                 })?;
 
         let ctx = EngineContext::default();
-        let req = DropTableRequest {
+        let req = CloseTableRequest {
             catalog_name: catalog_name.clone(),
             schema_name: schema_name.clone(),
             table_name: table_name.clone(),
+            table_id: *table_id,
         };
         engine
-            .drop_table(&ctx, req)
+            .close_table(&ctx, req)
             .await
             .map_err(BoxedError::new)
-            .with_context(|_| error::DropTableSnafu {
+            .with_context(|_| error::CloseTableSnafu {
                 table_name: format_full_table_name(catalog_name, schema_name, table_name),
             })?;
         Ok(true)
