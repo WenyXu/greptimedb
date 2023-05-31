@@ -17,14 +17,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use catalog::helper::TableGlobalKey;
+use catalog::remote::{CachedMetaKvBackend, Kv, KvBackend};
 use common_catalog::consts::{DEFAULT_CATALOG_NAME, DEFAULT_SCHEMA_NAME, MITO_ENGINE};
 use common_meta::instruction::TableIdent;
 use common_meta::RegionIdent;
 use common_procedure::{watcher, ProcedureWithId};
 use common_query::Output;
 use common_telemetry::info;
+use frontend::catalog::FrontendCatalogManager;
 use frontend::error::Result as FrontendResult;
-use frontend::instance::{FrontendInstance, Instance};
+use frontend::instance::Instance;
 use meta_srv::metasrv::SelectorContext;
 use meta_srv::procedure::region_failover::{RegionFailoverContext, RegionFailoverProcedure};
 use meta_srv::table_routes;
@@ -50,19 +52,20 @@ async fn test_region_failover() {
         .build()
         .await;
 
-    prepare_testing_table(&cluster).await;
-
-    // Inserts data to each datanode
     let frontend = cluster.frontend.clone();
-    let result = frontend.start().await;
 
-    info!("start frontend heartbeat: {:?}", result);
+    prepare_testing_table(&cluster).await;
 
     let results = write_datas(&frontend, logical_timer).await;
     logical_timer += 1;
     for result in results {
         assert!(matches!(result.unwrap(), Output::AffectedRows(1)));
     }
+
+    let cache = get_cache(&frontend, "__tg-greptime-public-my_table")
+        .await
+        .unwrap();
+    assert!(cache.is_some());
 
     let distribution = find_region_distribution(&cluster).await;
     info!("Find region distribution: {distribution:?}");
@@ -77,6 +80,12 @@ async fn test_region_failover() {
 
     // Waits for invalidating table cache
     time::sleep(Duration::from_millis(100)).await;
+
+    let cache = get_cache(&frontend, "__tg-greptime-public-my_table")
+        .await
+        .unwrap();
+    info!("cache: {:?}", cache);
+    // assert!(cache);
 
     // Inserts data to each datanode after failover
     let frontend = cluster.frontend.clone();
@@ -95,6 +104,23 @@ async fn test_region_failover() {
         .next()
         .unwrap()
         .contains(&failed_region.region_number));
+}
+
+async fn get_cache(instance: &Arc<Instance>, key: &str) -> Option<Kv> {
+    let catalog_manager = instance
+        .catalog_manager()
+        .as_any()
+        .downcast_ref::<FrontendCatalogManager>()
+        .unwrap();
+
+    let kvbackend = catalog_manager
+        .backend()
+        .as_any()
+        .downcast_ref::<CachedMetaKvBackend>()
+        .unwrap();
+    let cache = kvbackend.cache().get(key.as_bytes()).unwrap();
+
+    cache
 }
 
 async fn write_datas(instance: &Arc<Instance>, ts: u64) -> Vec<FrontendResult<Output>> {

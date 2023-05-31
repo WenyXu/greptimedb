@@ -151,6 +151,10 @@ impl KvBackend for MockKvBackend {
         }
         Ok(())
     }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 #[derive(Default)]
