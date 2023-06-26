@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 use std::{fs, path};
 
@@ -85,7 +85,7 @@ pub struct Instance {
 pub type InstanceRef = Arc<Instance>;
 
 impl Instance {
-    pub async fn with_opts(opts: &DatanodeOptions) -> Result<Self> {
+    pub async fn with_opts(opts: &DatanodeOptions) -> Result<Arc<Self>> {
         let meta_client = match opts.mode {
             Mode::Standalone => None,
             Mode::Distributed => {
@@ -109,7 +109,7 @@ impl Instance {
         opts: &DatanodeOptions,
         meta_client: Option<Arc<MetaClient>>,
         compaction_scheduler: CompactionSchedulerRef<RaftEngineLogStore>,
-    ) -> Result<Self> {
+    ) -> Result<Arc<Self>> {
         let object_store = store::new_object_store(&opts.storage.store).await?;
         let log_store = Arc::new(create_log_store(&opts.storage.store, &opts.wal).await?);
 
@@ -150,8 +150,10 @@ impl Instance {
             .with_engine_procedures(engine_procedures),
         );
 
+        let heartbeat_interval_millis = 5000;
+
         // create remote catalog manager
-        let (catalog_manager, table_id_provider, heartbeat_task) = match opts.mode {
+        let (catalog_manager, table_id_provider) = match opts.mode {
             Mode::Standalone => {
                 if opts.enable_memory_catalog {
                     let catalog = Arc::new(catalog::local::MemoryCatalogManager::default());
@@ -171,7 +173,6 @@ impl Instance {
                     (
                         catalog.clone() as CatalogManagerRef,
                         Some(catalog as TableIdProviderRef),
-                        None,
                     )
                 } else {
                     let catalog = Arc::new(
@@ -183,19 +184,16 @@ impl Instance {
                     (
                         catalog.clone() as CatalogManagerRef,
                         Some(catalog as TableIdProviderRef),
-                        None,
                     )
                 }
             }
 
             Mode::Distributed => {
-                let meta_client = meta_client.context(IncorrectInternalStateSnafu {
+                let meta_client = meta_client.clone().context(IncorrectInternalStateSnafu {
                     state: "meta client is not provided when creating distributed Datanode",
                 })?;
 
-                let kv_backend = Arc::new(CachedMetaKvBackend::new(meta_client.clone()));
-
-                let heartbeat_interval_millis = 5000;
+                let kv_backend = Arc::new(CachedMetaKvBackend::new(meta_client));
 
                 let region_alive_keepers = Arc::new(RegionAliveKeepers::new(
                     engine_manager.clone(),
@@ -206,36 +204,55 @@ impl Instance {
                     engine_manager.clone(),
                     opts.node_id.context(MissingNodeIdSnafu)?,
                     kv_backend,
-                    region_alive_keepers.clone(),
-                ));
-
-                let handlers_executor = HandlerGroupExecutor::new(vec![
-                    Arc::new(ParseMailboxMessageHandler::default()),
-                    Arc::new(OpenRegionHandler::new(
-                        catalog_manager.clone(),
-                        engine_manager.clone(),
-                        region_alive_keepers.clone(),
-                    )),
-                    Arc::new(CloseRegionHandler::new(
-                        catalog_manager.clone(),
-                        engine_manager.clone(),
-                        region_alive_keepers.clone(),
-                    )),
-                    region_alive_keepers.clone(),
-                ]);
-
-                let heartbeat_task = Some(HeartbeatTask::new(
-                    opts.node_id.context(MissingNodeIdSnafu)?,
-                    opts,
-                    meta_client,
-                    catalog_manager.clone(),
-                    Arc::new(handlers_executor),
-                    heartbeat_interval_millis,
                     region_alive_keepers,
                 ));
 
-                (catalog_manager as CatalogManagerRef, None, heartbeat_task)
+                (catalog_manager as CatalogManagerRef, None)
             }
+        };
+
+        let node_id = opts.node_id.context(MissingNodeIdSnafu)?;
+
+        let heartbeat_task_factory = match opts.mode {
+            Mode::Standalone => None,
+            Mode::Distributed => Some(
+                |_instance: Weak<Self>,
+                 catalog_manager: Arc<dyn CatalogManager>,
+                 engine_manager: Arc<MemoryTableEngineManager>| {
+                    let region_alive_keepers = Arc::new(RegionAliveKeepers::new(
+                        engine_manager.clone(),
+                        heartbeat_interval_millis,
+                    ));
+
+                    // Safety: checked before.
+                    let meta_client = meta_client.unwrap();
+
+                    let handlers_executor = HandlerGroupExecutor::new(vec![
+                        Arc::new(ParseMailboxMessageHandler::default()),
+                        Arc::new(OpenRegionHandler::new(
+                            catalog_manager.clone(),
+                            engine_manager.clone(),
+                            region_alive_keepers.clone(),
+                        )),
+                        Arc::new(CloseRegionHandler::new(
+                            catalog_manager.clone(),
+                            engine_manager,
+                            region_alive_keepers.clone(),
+                        )),
+                        region_alive_keepers.clone(),
+                    ]);
+
+                    HeartbeatTask::new(
+                        node_id,
+                        opts,
+                        meta_client,
+                        catalog_manager.clone(),
+                        Arc::new(handlers_executor),
+                        heartbeat_interval_millis,
+                        region_alive_keepers,
+                    )
+                },
+            ),
         };
 
         let factory = QueryEngineFactory::new(catalog_manager.clone(), false);
@@ -257,18 +274,23 @@ impl Instance {
             &*procedure_manager,
         );
 
-        Ok(Self {
-            query_engine: query_engine.clone(),
-            sql_handler: SqlHandler::new(
-                engine_manager,
-                catalog_manager.clone(),
-                procedure_manager.clone(),
-            ),
-            catalog_manager,
-            heartbeat_task,
-            table_id_provider,
-            procedure_manager,
-        })
+        Ok(Arc::new_cyclic(move |me| {
+            let heartbeat_task = heartbeat_task_factory
+                .map(|f| f(me.clone(), catalog_manager.clone(), engine_manager.clone()));
+
+            Self {
+                query_engine: query_engine.clone(),
+                sql_handler: SqlHandler::new(
+                    engine_manager,
+                    catalog_manager.clone(),
+                    procedure_manager.clone(),
+                ),
+                catalog_manager,
+                heartbeat_task,
+                table_id_provider,
+                procedure_manager,
+            }
+        }))
     }
 
     pub async fn start(&self) -> Result<()> {

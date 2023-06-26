@@ -24,12 +24,15 @@ use crate::error::Result;
 use crate::instance::Instance;
 
 impl Instance {
-    pub async fn with_mock_meta_client(opts: &DatanodeOptions) -> Result<Self> {
+    pub async fn with_mock_meta_client(opts: &DatanodeOptions) -> Result<Arc<Self>> {
         let mock_info = meta_srv::mocks::mock_with_memstore().await;
         Self::with_mock_meta_server(opts, mock_info).await
     }
 
-    pub async fn with_mock_meta_server(opts: &DatanodeOptions, meta_srv: MockInfo) -> Result<Self> {
+    pub async fn with_mock_meta_server(
+        opts: &DatanodeOptions,
+        meta_srv: MockInfo,
+    ) -> Result<Arc<Self>> {
         let meta_client = Arc::new(mock_meta_client(meta_srv, opts.node_id.unwrap_or(42)).await);
         let compaction_scheduler = Arc::new(NoopCompactionScheduler::default());
         Instance::new(opts, Some(meta_client), compaction_scheduler).await

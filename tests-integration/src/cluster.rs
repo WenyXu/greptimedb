@@ -176,11 +176,9 @@ impl GreptimeDbClusterBuilder {
         opts: &DatanodeOptions,
         meta_srv: MockInfo,
     ) -> Arc<DatanodeInstance> {
-        let instance = Arc::new(
-            DatanodeInstance::with_mock_meta_server(opts, meta_srv)
-                .await
-                .unwrap(),
-        );
+        let instance = DatanodeInstance::with_mock_meta_server(opts, meta_srv)
+            .await
+            .unwrap();
         instance.start().await.unwrap();
 
         // create another catalog and schema for testing

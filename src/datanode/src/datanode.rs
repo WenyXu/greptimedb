@@ -14,7 +14,6 @@
 
 //! Datanode configurations
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use common_base::readable_size::ReadableSize;
@@ -382,7 +381,7 @@ pub struct Datanode {
 
 impl Datanode {
     pub async fn new(opts: DatanodeOptions) -> Result<Datanode> {
-        let instance = Arc::new(Instance::with_opts(&opts).await?);
+        let instance = Instance::with_opts(&opts).await?;
         let services = match opts.mode {
             Mode::Distributed => Some(Services::try_new(instance.clone(), &opts).await?),
             Mode::Standalone => None,
