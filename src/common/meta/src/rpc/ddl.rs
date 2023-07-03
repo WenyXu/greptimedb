@@ -104,7 +104,7 @@ pub struct SubmitDdlTaskResponse {
 impl TryFrom<PbSubmitDdlTaskResponse> for SubmitDdlTaskResponse {
     type Error = error::Error;
     fn try_from(resp: PbSubmitDdlTaskResponse) -> Result<Self> {
-        let table_id = resp.table_id.context(error::InfoCorruptedSnafu {
+        let table_id = resp.table_id.context(error::InvalidProtoMsgSnafu {
             err_msg: "expected table_id",
         })?;
         Ok(Self {
@@ -127,7 +127,7 @@ impl TryFrom<PbCreateTableTask> for CreateTableTask {
         let table_info = serde_json::from_slice(&pb.table_info).context(error::SerdeJsonSnafu)?;
 
         Ok(CreateTableTask::new(
-            pb.create_table.context(error::InfoCorruptedSnafu {
+            pb.create_table.context(error::InvalidProtoMsgSnafu {
                 err_msg: "expected create table",
             })?,
             pb.partitions,
