@@ -16,7 +16,6 @@ pub(crate) mod inserter;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use api::helper::ColumnDataTypeWrapper;
 use api::v1::ddl_request::{Expr as DdlExpr, Expr};
@@ -63,7 +62,6 @@ use table::metadata::{RawTableInfo, RawTableMeta, TableId, TableIdent, TableType
 use table::requests::TableOptions;
 use table::table::AlterContext;
 use table::TableRef;
-use tokio::time::timeout;
 
 use crate::catalog::FrontendCatalogManager;
 use crate::error::{
@@ -505,14 +503,10 @@ impl DistInstance {
             task: DdlTask::new_create_table(create_table.clone(), partitions, table_info),
         };
 
-        timeout(
-            // TODO(weny): makes timeout configurable.
-            Duration::from_secs(10),
-            self.meta_client.submit_ddl_task(request),
-        )
-        .await
-        .context(error::TimeoutSnafu)?
-        .context(error::RequestMetaSnafu)
+        self.meta_client
+            .submit_ddl_task(request)
+            .await
+            .context(error::RequestMetaSnafu)
     }
 
     async fn drop_table_procedure(
@@ -529,14 +523,10 @@ impl DistInstance {
             ),
         };
 
-        timeout(
-            // TODO(weny): makes timeout configurable.
-            Duration::from_secs(10),
-            self.meta_client.submit_ddl_task(request),
-        )
-        .await
-        .context(error::TimeoutSnafu)?
-        .context(error::RequestMetaSnafu)
+        self.meta_client
+            .submit_ddl_task(request)
+            .await
+            .context(error::RequestMetaSnafu)
     }
 
     async fn handle_dist_insert(

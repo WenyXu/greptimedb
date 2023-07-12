@@ -22,6 +22,7 @@ pub mod error;
 pub struct MetaClientOptions {
     pub metasrv_addrs: Vec<String>,
     pub timeout_millis: u64,
+    pub ddl_timeout_millis: u64,
     pub connect_timeout_millis: u64,
     pub tcp_nodelay: bool,
 }
@@ -31,6 +32,7 @@ impl Default for MetaClientOptions {
         Self {
             metasrv_addrs: vec!["127.0.0.1:3002".to_string()],
             timeout_millis: 3_000u64,
+            ddl_timeout_millis: 10_000u64,
             connect_timeout_millis: 5_000u64,
             tcp_nodelay: true,
         }
