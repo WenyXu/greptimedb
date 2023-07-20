@@ -12,19 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+use std::time::Instant;
+
 use common_meta::key::table_name::{TableNameKey, TableNameManager};
+use common_telemetry::info;
+use futures::future::try_join_all;
+use futures::Future;
 
 use super::bench;
 
-pub struct TableNameBencher<'a> {
-    table_name_manager: &'a TableNameManager,
+pub struct TableNameBencher {
+    table_name_manager: Arc<TableNameManager>,
     count: u32,
 }
 
-impl<'a> TableNameBencher<'a> {
-    pub fn new(table_name_manager: &'a TableNameManager, count: u32) -> Self {
+impl TableNameBencher {
+    pub fn new(table_name_manager: TableNameManager, count: u32) -> Self {
         Self {
-            table_name_manager,
+            table_name_manager: Arc::new(table_name_manager),
             count,
         }
     }
@@ -33,96 +39,88 @@ impl<'a> TableNameBencher<'a> {
         self.bench_create().await;
         self.bench_rename().await;
         self.bench_get().await;
-        self.bench_tables().await;
+        // self.bench_tables().await;
         self.bench_remove().await;
+    }
+
+    async fn bench_parallel<F, Fut>(&self, desc: &str, f: F, count: u32)
+    where
+        F: Fn(u32, Arc<TableNameManager>) -> Fut,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let mut handlers = Vec::with_capacity(count as usize);
+
+        for i in 1..=count {
+            let fut = f(i, self.table_name_manager.clone());
+            handlers.push(tokio::spawn(async move {
+                let start = Instant::now();
+                fut.await;
+                start.elapsed().as_millis() as u64
+            }));
+        }
+        let mut all = try_join_all(handlers).await.unwrap();
+        let avg = all.iter().sum::<u64>() / count as u64;
+        all.sort();
+        let p50 = all[(count as f64 * 0.5) as usize];
+        let p95 = all[(count as f64 * 0.95) as usize];
+        let p99 = all[(count as f64 * 0.99) as usize];
+
+        info!("{desc}, average operation cost: {avg:.2} ms, p50: {p50:.2} ms, p95: {p95:.2} ms, p99: {p99:.2} ms");
     }
 
     async fn bench_create(&self) {
         let desc = format!("TableNameBencher: create {} table names", self.count);
-        bench(
-            &desc,
-            |i| async move {
-                let table_name = format!("bench_table_name_{}", i);
-                let table_name_key = create_table_name_key(&table_name);
-                self.table_name_manager
-                    .create(&table_name_key, i)
-                    .await
-                    .unwrap();
-            },
-            self.count,
-        )
-        .await;
+        let f = |i, mgr: Arc<TableNameManager>| async move {
+            let table_name = format!("bench_table_name_{}", i);
+            let table_name_key = create_table_name_key(&table_name);
+            mgr.create(&table_name_key, i).await.unwrap();
+        };
+        self.bench_parallel(&desc, f, self.count).await;
     }
 
     async fn bench_rename(&self) {
         let desc = format!("TableNameBencher: rename {} table names", self.count);
-        bench(
-            &desc,
-            |i| async move {
-                let table_name = format!("bench_table_name_{}", i);
-                let new_table_name = format!("bench_table_name_new_{}", i);
-                let table_name_key = create_table_name_key(&table_name);
-                self.table_name_manager
-                    .rename(table_name_key, i, &new_table_name)
-                    .await
-                    .unwrap();
-            },
-            self.count,
-        )
-        .await;
+        let f = |i, mgr: Arc<TableNameManager>| async move {
+            let table_name = format!("bench_table_name_{}", i);
+            let new_table_name = format!("bench_table_name_new_{}", i);
+            let table_name_key = create_table_name_key(&table_name);
+            mgr.rename(table_name_key, i, &new_table_name)
+                .await
+                .unwrap();
+        };
+        self.bench_parallel(&desc, f, self.count).await;
     }
 
     async fn bench_get(&self) {
         let desc = format!("TableNameBencher: get {} table names", self.count);
-        bench(
-            &desc,
-            |i| async move {
-                let table_name = format!("bench_table_name_new_{}", i);
-                let table_name_key = create_table_name_key(&table_name);
-                assert!(self
-                    .table_name_manager
-                    .get(table_name_key)
-                    .await
-                    .unwrap()
-                    .is_some());
-            },
-            self.count,
-        )
-        .await;
+        let f = |i, mgr: Arc<TableNameManager>| async move {
+            let table_name = format!("bench_table_name_new_{}", i);
+            let table_name_key = create_table_name_key(&table_name);
+            assert!(mgr.get(table_name_key).await.unwrap().is_some());
+        };
+        self.bench_parallel(&desc, f, self.count).await;
     }
 
     async fn bench_tables(&self) {
         let desc = format!("TableNameBencher: list all {} table names", self.count);
-        bench(
-            &desc,
-            |_| async move {
-                assert!(!self
-                    .table_name_manager
-                    .tables("bench_catalog", "bench_schema")
-                    .await
-                    .unwrap()
-                    .is_empty());
-            },
-            self.count,
-        )
-        .await;
+        let f = |_, mgr: Arc<TableNameManager>| async move {
+            assert!(!mgr
+                .tables("bench_catalog", "bench_schema")
+                .await
+                .unwrap()
+                .is_empty());
+        };
+        self.bench_parallel(&desc, f, self.count).await;
     }
 
     async fn bench_remove(&self) {
         let desc = format!("TableNameBencher: remove {} table names", self.count);
-        bench(
-            &desc,
-            |i| async move {
-                let table_name = format!("bench_table_name_new_{}", i);
-                let table_name_key = create_table_name_key(&table_name);
-                self.table_name_manager
-                    .remove(table_name_key)
-                    .await
-                    .unwrap();
-            },
-            self.count,
-        )
-        .await;
+        let f = |i, mgr: Arc<TableNameManager>| async move {
+            let table_name = format!("bench_table_name_new_{}", i);
+            let table_name_key = create_table_name_key(&table_name);
+            mgr.remove(table_name_key).await.unwrap();
+        };
+        self.bench_parallel(&desc, f, self.count).await;
     }
 }
 

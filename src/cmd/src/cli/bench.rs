@@ -26,9 +26,11 @@ use clap::Parser;
 use common_meta::key::table_region::RegionDistribution;
 use common_meta::key::{TableMetadataManager, TableMetadataManagerRef};
 use common_meta::table_name::TableName;
+use common_query::Output;
 use common_telemetry::info;
 use datatypes::data_type::ConcreteDataType;
 use datatypes::schema::{ColumnSchema, RawSchema};
+use futures::future::{join_all, try_join_all, BoxFuture};
 use meta_srv::service::store::etcd::EtcdStore;
 use meta_srv::service::store::kv::KvBackendAdapter;
 use rand::prelude::SliceRandom;
@@ -108,30 +110,33 @@ struct BenchTableMetadata {
 impl Tool for BenchTableMetadata {
     async fn do_work(&self) -> Result<()> {
         info!("Start benching table name manager ...");
-        TableNameBencher::new(self.table_metadata_manager.table_name_manager(), self.count)
-            .start()
-            .await;
+        TableNameBencher::new(
+            self.table_metadata_manager.table_name_manager().clone(),
+            self.count,
+        )
+        .start()
+        .await;
 
         info!("Start benching table info manager ...");
         TableInfoBencher::new(self.table_metadata_manager.table_info_manager(), self.count)
             .start()
             .await;
 
-        info!("Start benching table region manager ...");
-        TableRegionBencher::new(
-            self.table_metadata_manager.table_region_manager(),
-            self.count,
-        )
-        .start()
-        .await;
+        // info!("Start benching table region manager ...");
+        // TableRegionBencher::new(
+        //     self.table_metadata_manager.table_region_manager(),
+        //     self.count,
+        // )
+        // .start()
+        // .await;
 
-        info!("Start benching datanode table manager ...");
-        DatanodeTableBencher::new(
-            self.table_metadata_manager.datanode_table_manager(),
-            self.count,
-        )
-        .start()
-        .await;
+        // info!("Start benching datanode table manager ...");
+        // DatanodeTableBencher::new(
+        //     self.table_metadata_manager.datanode_table_manager(),
+        //     self.count,
+        // )
+        // .start()
+        // .await;
         Ok(())
     }
 }
