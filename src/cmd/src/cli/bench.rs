@@ -14,6 +14,7 @@
 
 mod datanode_table;
 mod table_info;
+mod table_meta;
 mod table_name;
 mod table_region;
 
@@ -38,6 +39,7 @@ use table::metadata::{RawTableInfo, RawTableMeta, TableId, TableIdent, TableType
 
 use crate::cli::bench::datanode_table::DatanodeTableBencher;
 use crate::cli::bench::table_info::TableInfoBencher;
+use crate::cli::bench::table_meta::TableMetadataBencher;
 use crate::cli::bench::table_name::TableNameBencher;
 use crate::cli::bench::table_region::TableRegionBencher;
 use crate::cli::{Instance, Tool};
@@ -109,18 +111,29 @@ struct BenchTableMetadata {
 #[async_trait]
 impl Tool for BenchTableMetadata {
     async fn do_work(&self) -> Result<()> {
-        info!("Start benching table name manager ...");
-        TableNameBencher::new(
-            self.table_metadata_manager.table_name_manager().clone(),
+        let mgr = &self.table_metadata_manager;
+        let bencher = Arc::new(TableMetadataBencher::new(
+            mgr.datanode_table_manager().clone(),
+            mgr.table_name_manager().clone(),
+            mgr.table_region_manager().clone(),
+            mgr.table_info_manager().clone(),
             self.count,
-        )
-        .start()
-        .await;
+        ));
+        info!("Start benching table metadata with small transactions ...");
+        bencher.bench_create().await;
+        info!("Start benching table metadata with single large txn ...");
+        bencher.bench_create_large_txn().await;
 
-        info!("Start benching table info manager ...");
-        TableInfoBencher::new(self.table_metadata_manager.table_info_manager(), self.count)
-            .start()
-            .await;
+        // info!("Start benching table name manager ...");
+        // TableNameBencher::new(
+        //     self.table_metadata_manager.table_name_manager().clone(),
+        //     self.count,
+        // )
+        // .start()
+        // .await;
+        // TableInfoBencher::new(self.table_metadata_manager.table_info_manager(), self.count)
+        //     .start()
+        //     .await;
 
         // info!("Start benching table region manager ...");
         // TableRegionBencher::new(
@@ -141,7 +154,7 @@ impl Tool for BenchTableMetadata {
     }
 }
 
-fn create_table_info(table_id: TableId, table_name: TableName) -> RawTableInfo {
+pub fn create_table_info(table_id: TableId, table_name: TableName) -> RawTableInfo {
     let columns = 100;
     let mut column_schemas = Vec::with_capacity(columns);
     column_schemas.push(
@@ -188,7 +201,7 @@ fn create_table_info(table_id: TableId, table_name: TableName) -> RawTableInfo {
     }
 }
 
-fn create_region_distribution() -> RegionDistribution {
+pub fn create_region_distribution() -> RegionDistribution {
     let mut regions = (1..=100).collect::<Vec<u32>>();
     regions.shuffle(&mut rand::thread_rng());
 

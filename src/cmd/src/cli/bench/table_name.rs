@@ -124,6 +124,6 @@ impl TableNameBencher {
     }
 }
 
-fn create_table_name_key(table_name: &str) -> TableNameKey {
+pub fn create_table_name_key(table_name: &str) -> TableNameKey {
     TableNameKey::new("bench_catalog", "bench_schema", table_name)
 }

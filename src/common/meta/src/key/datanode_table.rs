@@ -88,8 +88,9 @@ impl DatanodeTableValue {
     }
 }
 
+#[derive(Clone)]
 pub struct DatanodeTableManager {
-    kv_backend: KvBackendRef,
+    pub kv_backend: KvBackendRef,
 }
 
 impl DatanodeTableManager {

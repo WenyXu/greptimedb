@@ -43,7 +43,7 @@ impl<'a> TableRegionBencher<'a> {
         bench_self_recorded(
             &desc,
             |i| async move {
-                let region_distribution = create_region_distribution();
+                let region_distribution: std::collections::BTreeMap<u64, Vec<u32>> = create_region_distribution();
 
                 let start = Instant::now();
 

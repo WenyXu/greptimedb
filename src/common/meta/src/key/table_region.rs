@@ -59,6 +59,7 @@ impl TableRegionValue {
     }
 }
 
+#[derive(Clone)]
 pub struct TableRegionManager {
     kv_backend: KvBackendRef,
 }

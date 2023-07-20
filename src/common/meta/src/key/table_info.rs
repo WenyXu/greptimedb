@@ -41,7 +41,7 @@ impl TableMetaKey for TableInfoKey {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TableInfoValue {
     pub table_info: RawTableInfo,
-    version: u64,
+     version: u64,
 }
 
 impl TableInfoValue {
@@ -53,6 +53,7 @@ impl TableInfoValue {
     }
 }
 
+#[derive(Clone)]
 pub struct TableInfoManager {
     kv_backend: KvBackendRef,
 }
