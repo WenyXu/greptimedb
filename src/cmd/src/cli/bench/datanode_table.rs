@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use common_meta::key::datanode_table::{DatanodeTableKey, DatanodeTableManager};
+use futures::TryStreamExt;
 
 use super::bench;
 
@@ -105,6 +106,7 @@ impl<'a> DatanodeTableBencher<'a> {
                 assert!(!self
                     .datanode_table_manager
                     .tables(1)
+                    .try_collect::<Vec<_>>()
                     .await
                     .unwrap()
                     .is_empty());

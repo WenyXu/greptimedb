@@ -235,6 +235,7 @@ mod tests {
     use common_meta::key::table_region::TableRegionValue;
     use common_meta::key::TableRouteKey;
     use common_meta::DatanodeId;
+    use futures::TryStreamExt;
     use store_api::storage::RegionNumber;
 
     use super::super::tests::{TestingEnv, TestingEnvBuilder};
@@ -539,15 +540,27 @@ mod tests {
 
             // test DatanodeTableValues matches the table region distribution
             let datanode_table_manager = manager.datanode_table_manager();
-            let tables = datanode_table_manager.tables(1).await.unwrap();
+            let tables = datanode_table_manager
+                .tables(1)
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
             assert!(tables.is_empty());
 
-            let tables = datanode_table_manager.tables(2).await.unwrap();
+            let tables = datanode_table_manager
+                .tables(2)
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
             assert_eq!(tables.len(), 1);
             assert_eq!(tables[0].table_id, 1);
             assert_eq!(tables[0].regions, vec![3, 1]);
 
-            let tables = datanode_table_manager.tables(3).await.unwrap();
+            let tables = datanode_table_manager
+                .tables(3)
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
             assert_eq!(tables.len(), 1);
             assert_eq!(tables[0].table_id, 1);
             assert_eq!(tables[0].regions, vec![4, 2]);

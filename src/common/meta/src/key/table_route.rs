@@ -189,6 +189,17 @@ impl TableRouteManager {
             .transpose()
     }
 
+    #[cfg(test)]
+    pub async fn get_removed(&self, table_id: TableId) -> Result<Option<TableRouteValue>> {
+        let key = NextTableRouteKey::new(table_id).to_string();
+        let removed_key = to_removed_key(&key).into_bytes();
+        self.kv_backend
+            .get(&removed_key)
+            .await?
+            .map(|x| TableRouteValue::try_from_raw_value(x.value))
+            .transpose()
+    }
+
     // Creates TableRoute key and value. If the key already exists, check whether the value is the same.
     pub async fn create(&self, table_id: TableId, region_routes: Vec<RegionRoute>) -> Result<()> {
         let key = NextTableRouteKey::new(table_id);

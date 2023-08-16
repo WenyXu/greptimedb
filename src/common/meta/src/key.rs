@@ -497,7 +497,7 @@ macro_rules! impl_try_from {
     };
 }
 
-impl_try_from! {TableInfoValue, TableRouteValue}
+impl_try_from! {TableInfoValue, TableRouteValue, DatanodeTableValue}
 
 impl_table_meta_value! {
     CatalogNameValue,
@@ -516,10 +516,12 @@ mod tests {
 
     use datatypes::prelude::ConcreteDataType;
     use datatypes::schema::{ColumnSchema, SchemaBuilder};
+    use futures::TryStreamExt;
     use table::metadata::{RawTableInfo, TableInfo, TableInfoBuilder, TableMetaBuilder};
 
     use super::datanode_table::DatanodeTableKey;
     use crate::key::table_info::TableInfoValue;
+    use crate::key::table_name::TableNameKey;
     use crate::key::table_route::TableRouteValue;
     use crate::key::{to_removed_key, TableMetadataManager};
     use crate::kv_backend::memory::MemoryKvBackend;
@@ -588,6 +590,7 @@ mod tests {
         let mem_kv = Arc::new(MemoryKvBackend::default());
         let table_metadata_manager = TableMetadataManager::new(mem_kv);
         let table_info: RawTableInfo = new_test_table_info().into();
+        let table_id = table_info.ident.table_id;
         let region_route = new_test_region_route();
         let region_routes = vec![region_route.clone()];
         // creates metadata.
@@ -601,12 +604,28 @@ mod tests {
             .await
             .unwrap();
         let mut modified_region_routes = region_routes.clone();
-        modified_region_routes.push(region_route);
+        modified_region_routes.push(region_route.clone());
         // if remote metadata was exists, it should return an error.
         assert!(table_metadata_manager
-            .create_table_metadata(table_info, modified_region_routes)
+            .create_table_metadata(table_info.clone(), modified_region_routes)
             .await
             .is_err());
+
+        let remote_table_info = table_metadata_manager
+            .table_info_manager()
+            .get(table_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(remote_table_info.table_info, table_info);
+
+        let remote_table_route = table_metadata_manager
+            .table_route_manager()
+            .get(table_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(remote_table_route.region_routes, region_routes);
     }
 
     #[tokio::test]
@@ -615,13 +634,15 @@ mod tests {
         let table_metadata_manager = TableMetadataManager::new(mem_kv);
         let table_info: RawTableInfo = new_test_table_info().into();
         let region_route = new_test_region_route();
+        let datanode_id = 2;
         let region_routes = vec![region_route.clone()];
+        let table_id = table_info.ident.table_id;
         // creates metadata.
         table_metadata_manager
             .create_table_metadata(table_info.clone(), region_routes.clone())
             .await
             .unwrap();
-        let table_info_value = TableInfoValue::new(table_info);
+        let table_info_value = TableInfoValue::new(table_info.clone());
         // deletes metadata.
         table_metadata_manager
             .delete_table_metadata(table_info_value.clone(), region_routes.clone())
@@ -632,6 +653,44 @@ mod tests {
             .delete_table_metadata(table_info_value.clone(), region_routes.clone())
             .await
             .unwrap();
+
+        assert!(table_metadata_manager
+            .table_info_manager()
+            .get(table_id)
+            .await
+            .unwrap()
+            .is_none());
+
+        assert!(table_metadata_manager
+            .table_route_manager()
+            .get(table_id)
+            .await
+            .unwrap()
+            .is_none());
+
+        assert!(table_metadata_manager
+            .datanode_table_manager()
+            .tables(datanode_id)
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
+            .is_empty());
+        // Checks removed values
+        let removed_table_info = table_metadata_manager
+            .table_info_manager()
+            .get_removed(table_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(removed_table_info.table_info, table_info);
+
+        let removed_table_route = table_metadata_manager
+            .table_route_manager()
+            .get_removed(table_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(removed_table_route.region_routes, region_routes);
     }
 
     #[tokio::test]
@@ -639,6 +698,7 @@ mod tests {
         let mem_kv = Arc::new(MemoryKvBackend::default());
         let table_metadata_manager = TableMetadataManager::new(mem_kv);
         let table_info: RawTableInfo = new_test_table_info().into();
+        let table_id = table_info.ident.table_id;
         let region_route = new_test_region_route();
         let region_routes = vec![region_route.clone()];
         // creates metadata.
@@ -657,7 +717,7 @@ mod tests {
             .rename_table(table_info_value.clone(), new_table_name.clone())
             .await
             .unwrap();
-        let mut modified_table_info = table_info;
+        let mut modified_table_info = table_info.clone();
         modified_table_info.name = "hi".to_string();
         let modified_table_info_value = table_info_value.update(modified_table_info);
         // if the table_info_value is wrong, it should return an error.
@@ -665,7 +725,36 @@ mod tests {
         assert!(table_metadata_manager
             .rename_table(modified_table_info_value.clone(), new_table_name.clone())
             .await
-            .is_err())
+            .is_err());
+
+        let old_table_name = TableNameKey::new(
+            &table_info.catalog_name,
+            &table_info.schema_name,
+            &table_info.name,
+        );
+        let new_table_name = TableNameKey::new(
+            &table_info.catalog_name,
+            &table_info.schema_name,
+            &new_table_name,
+        );
+
+        assert!(table_metadata_manager
+            .table_name_manager()
+            .get(old_table_name)
+            .await
+            .unwrap()
+            .is_none());
+
+        assert_eq!(
+            table_metadata_manager
+                .table_name_manager()
+                .get(new_table_name)
+                .await
+                .unwrap()
+                .unwrap()
+                .table_id(),
+            table_id
+        );
     }
 
     #[tokio::test]
@@ -673,6 +762,7 @@ mod tests {
         let mem_kv = Arc::new(MemoryKvBackend::default());
         let table_metadata_manager = TableMetadataManager::new(mem_kv);
         let table_info: RawTableInfo = new_test_table_info().into();
+        let table_id = table_info.ident.table_id;
         let region_route = new_test_region_route();
         let region_routes = vec![region_route.clone()];
         // creates metadata.
@@ -693,6 +783,16 @@ mod tests {
             .update_table_info(current_table_info_value.clone(), new_table_info.clone())
             .await
             .unwrap();
+
+        // updated table_info should equal the `new_table_info`
+        let updated_table_info = table_metadata_manager
+            .table_info_manager()
+            .get(table_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated_table_info.table_info, new_table_info);
+
         let mut wrong_table_info = table_info.clone();
         wrong_table_info.name = "wrong".to_string();
         let wrong_table_info_value = current_table_info_value.update(wrong_table_info);
@@ -764,7 +864,7 @@ mod tests {
             .unwrap();
 
         let current_table_route_value = current_table_route_value.update(new_region_routes.clone());
-        let new_region_routes = vec![new_region_route(4, 4), new_region_route(5, 5)];
+        let new_region_routes = vec![new_region_route(2, 4), new_region_route(5, 5)];
         // it should be ok.
         table_metadata_manager
             .update_table_route(
