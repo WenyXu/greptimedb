@@ -40,13 +40,13 @@ pub enum Error {
     RegisterProcedureLoader {
         type_name: String,
         location: Location,
-        source: common_procedure::error::Error,
+        source: BoxedError,
     },
 
     #[snafu(display("Failed to submit procedure, source: {source}"))]
     SubmitProcedure {
         location: Location,
-        source: common_procedure::Error,
+        source: BoxedError,
     },
 
     #[snafu(display("Unsupported operation {}, location: {}", operation, location))]
@@ -58,13 +58,13 @@ pub enum Error {
     #[snafu(display("Failed to wait procedure done, source: {source}"))]
     WaitProcedure {
         location: Location,
-        source: common_procedure::Error,
+        source: BoxedError,
     },
 
     #[snafu(display("Failed to convert RawTableInfo into TableInfo: {}", source))]
     ConvertRawTableInfo {
         location: Location,
-        source: datatypes::Error,
+        source: BoxedError,
     },
 
     #[snafu(display("Primary key '{key}' not found when creating region request, at {location}"))]
@@ -84,7 +84,7 @@ pub enum Error {
     #[snafu(display("Table occurs error, source: {}", source))]
     Table {
         location: Location,
-        source: table::error::Error,
+        source: BoxedError,
     },
 
     #[snafu(display("Table route not found: {}", table_name))]
@@ -142,7 +142,7 @@ pub enum Error {
 
     #[snafu(display("Failed to convert alter table request, source: {source}, at {location}"))]
     ConvertAlterTableRequest {
-        source: common_grpc_expr::error::Error,
+        source: BoxedError,
         location: Location,
     },
 
