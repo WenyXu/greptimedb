@@ -18,7 +18,6 @@ mod influxdb;
 mod opentsdb;
 mod otlp;
 mod prom_store;
-pub mod region_handler;
 mod script;
 mod standalone;
 
@@ -33,6 +32,7 @@ use auth::{PermissionChecker, PermissionCheckerRef, PermissionReq};
 use catalog::remote::CachedMetaKvBackend;
 use catalog::CatalogManagerRef;
 use client::client_manager::DatanodeClients;
+use client::region_handler::RegionRequestHandlerRef;
 use common_base::Plugins;
 use common_config::KvStoreConfig;
 use common_error::ext::BoxedError;
@@ -85,7 +85,6 @@ use sql::statements::statement::Statement;
 use sqlparser::ast::ObjectName;
 
 use self::distributed::DistRegionRequestHandler;
-use self::region_handler::RegionRequestHandlerRef;
 use self::standalone::{
     StandaloneDatanodeManager, StandaloneRegionRequestHandler, StandaloneTableCreator,
 };
@@ -172,14 +171,14 @@ impl Instance {
             table_metadata_manager.clone(),
         );
         let catalog_manager = Arc::new(catalog_manager);
+        let dist_request_handler = DistRegionRequestHandler::arc(catalog_manager.clone());
 
         let dist_instance = Arc::new(DistInstance::new(catalog_manager.clone()));
 
         let query_engine = QueryEngineFactory::new_with_plugins(
             catalog_manager.clone(),
+            Some(dist_request_handler),
             true,
-            Some(partition_manager.clone()),
-            Some(datanode_clients.clone()),
             plugins.clone(),
         )
         .query_engine();

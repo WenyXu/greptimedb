@@ -29,6 +29,7 @@ use api::v1::region::region_request;
 use api::v1::CreateTableExpr;
 use catalog::error::{InternalSnafu, InvalidSystemTableDefSnafu};
 use catalog::{CatalogManagerRef, RegisterSystemTableRequest};
+use client::region_handler::RegionRequestHandlerRef;
 use common_error::ext::BoxedError;
 use common_meta::cache_invalidator::CacheInvalidatorRef;
 use common_meta::ddl::DdlTaskExecutorRef;
@@ -56,12 +57,11 @@ use table::TableRef;
 use crate::catalog::FrontendCatalogManager;
 use crate::error::{
     self, CatalogSnafu, ExecLogicalPlanSnafu, ExecuteStatementSnafu, ExternalSnafu, InsertSnafu,
-    PlanStatementSnafu, Result, TableNotFoundSnafu,
+    PlanStatementSnafu, RequestDatanodeSnafu, Result, TableNotFoundSnafu,
 };
 use crate::expr_factory;
 use crate::inserter::req_convert::TableToRegion;
 use crate::instance::distributed::deleter::DistDeleter;
-use crate::instance::region_handler::RegionRequestHandlerRef;
 use crate::statement::backup::{COPY_DATABASE_TIME_END_KEY, COPY_DATABASE_TIME_START_KEY};
 
 #[derive(Clone)]
@@ -231,7 +231,8 @@ impl StatementExecutor {
         let region_response = self
             .region_request_handler
             .handle(region_request::Body::Inserts(request), query_ctx)
-            .await?;
+            .await
+            .context(RequestDatanodeSnafu)?;
 
         Ok(region_response.affected_rows as _)
     }

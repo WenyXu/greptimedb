@@ -16,8 +16,10 @@ use std::sync::Arc;
 
 use api::v1::greptime_request::Request;
 use api::v1::meta::Partition;
-use api::v1::region::{region_request, RegionRequest, RegionResponse};
+use api::v1::region::{region_request, QueryRequest, RegionRequest, RegionResponse};
 use async_trait::async_trait;
+use client::error::{HandleRequestSnafu, Result as ClientResult};
+use client::region_handler::RegionRequestHandler;
 use common_error::ext::BoxedError;
 use common_meta::datanode_manager::{AffectedRows, Datanode, DatanodeManager, DatanodeRef};
 use common_meta::ddl::{TableCreator, TableCreatorContext};
@@ -25,6 +27,7 @@ use common_meta::error::{self as meta_error, Result as MetaResult};
 use common_meta::peer::Peer;
 use common_meta::rpc::router::{Region, RegionRoute};
 use common_query::Output;
+use common_recordbatch::SendableRecordBatchStream;
 use datanode::error::Error as DatanodeError;
 use datanode::region_server::RegionServer;
 use servers::grpc::region_server::RegionServerHandler;
@@ -34,7 +37,6 @@ use snafu::{OptionExt, ResultExt};
 use store_api::storage::{RegionId, TableId};
 use table::metadata::RawTableInfo;
 
-use super::region_handler::RegionRequestHandler;
 use crate::error::{Error, InvokeDatanodeSnafu, InvokeRegionServerSnafu, Result};
 
 pub(crate) struct StandaloneGrpcQueryHandler(GrpcQueryHandlerRef<DatanodeError>);
@@ -73,11 +75,21 @@ impl RegionRequestHandler for StandaloneRegionRequestHandler {
         &self,
         request: region_request::Body,
         _ctx: QueryContextRef,
-    ) -> Result<RegionResponse> {
+    ) -> ClientResult<RegionResponse> {
         self.region_server
             .handle(request)
             .await
             .context(InvokeRegionServerSnafu)
+            .map_err(BoxedError::new)
+            .context(HandleRequestSnafu)
+    }
+
+    async fn do_get(&self, request: QueryRequest) -> ClientResult<SendableRecordBatchStream> {
+        self.region_server
+            .handle_read(request)
+            .await
+            .map_err(BoxedError::new)
+            .context(HandleRequestSnafu)
     }
 }
 
