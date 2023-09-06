@@ -17,6 +17,7 @@ use std::sync::Arc;
 use common_meta::key::TableMetadataManager;
 use common_meta::peer::Peer;
 use common_meta::rpc::router::{Region, RegionRoute};
+use common_meta::sequence::Sequence;
 use common_meta::state_store::KvStateStore;
 use common_procedure::local::{LocalManager, ManagerConfig};
 
@@ -26,7 +27,6 @@ use crate::lock::memory::MemLock;
 use crate::metasrv::SelectorContext;
 use crate::procedure::region_failover::RegionFailoverManager;
 use crate::selector::lease_based::LeaseBasedSelector;
-use crate::sequence::Sequence;
 use crate::service::store::etcd::MAX_TXN_SIZE;
 use crate::service::store::kv::KvBackendAdapter;
 use crate::service::store::memory::MemStore;
@@ -50,7 +50,12 @@ pub(crate) fn create_region_failover_manager() -> Arc<RegionFailoverManager> {
     let kv_store = Arc::new(MemStore::new());
 
     let pushers = Pushers::default();
-    let mailbox_sequence = Sequence::new("test_heartbeat_mailbox", 0, 100, kv_store.clone());
+    let mailbox_sequence = Sequence::new(
+        "test_heartbeat_mailbox",
+        0,
+        100,
+        KvBackendAdapter::wrap(kv_store.clone()),
+    );
     let mailbox = HeartbeatMailbox::create(pushers, mailbox_sequence);
 
     let state_store = Arc::new(KvStateStore::new(
