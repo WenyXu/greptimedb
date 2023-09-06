@@ -57,7 +57,6 @@ use distributed::DistInstance;
 use log_store::raft_engine::RaftEngineBackend;
 use meta_client::client::{MetaClient, MetaClientBuilder};
 use partition::manager::PartitionRuleManager;
-use partition::route::TableRoutes;
 use query::parser::{PromQuery, QueryLanguageParser, QueryStatement};
 use query::plan::LogicalPlan;
 use query::query_engine::options::{validate_catalog_and_schema, QueryOptions};
@@ -159,14 +158,14 @@ impl Instance {
         opts: &FrontendOptions,
     ) -> Result<Self> {
         let meta_backend = Arc::new(CachedMetaKvBackend::new(meta_client.clone()));
-        let table_routes = Arc::new(TableRoutes::new(meta_client.clone()));
-        let partition_manager = Arc::new(PartitionRuleManager::new(table_routes));
+
+        let partition_manager = Arc::new(PartitionRuleManager::new(meta_backend.clone()));
 
         let table_metadata_manager = Arc::new(TableMetadataManager::new(meta_backend.clone()));
         let catalog_manager = FrontendCatalogManager::new(
             meta_backend.clone(),
             meta_backend.clone(),
-            partition_manager.clone(),
+            partition_manager,
             datanode_clients.clone(),
             table_metadata_manager.clone(),
         );
@@ -191,7 +190,7 @@ impl Instance {
             dist_instance.clone(),
             region_request_handler.clone(),
             meta_client.clone(),
-            table_metadata_manager,
+            meta_backend.clone(),
             catalog_manager.clone(),
         ));
 
@@ -202,10 +201,7 @@ impl Instance {
 
         let handlers_executor = HandlerGroupExecutor::new(vec![
             Arc::new(ParseMailboxMessageHandler),
-            Arc::new(InvalidateTableCacheHandler::new(
-                meta_backend,
-                partition_manager,
-            )),
+            Arc::new(InvalidateTableCacheHandler::new(meta_backend)),
         ]);
 
         let heartbeat_task = Some(HeartbeatTask::new(
@@ -329,7 +325,7 @@ impl Instance {
             dn_instance.clone(),
             region_request_handler.clone(),
             ddl_executor,
-            table_metadata_manager.clone(),
+            kv_backend.clone(),
             cache_invalidator,
         ));
 

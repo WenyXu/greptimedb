@@ -26,19 +26,21 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use api::v1::region::region_request;
-use api::v1::CreateTableExpr;
+use api::v1::{CreateDatabaseExpr, CreateTableExpr};
 use catalog::error::{InternalSnafu, InvalidSystemTableDefSnafu};
 use catalog::{CatalogManagerRef, RegisterSystemTableRequest};
 use client::region_handler::RegionRequestHandlerRef;
 use common_error::ext::BoxedError;
 use common_meta::cache_invalidator::CacheInvalidatorRef;
 use common_meta::ddl::DdlTaskExecutorRef;
-use common_meta::key::TableMetadataManagerRef;
+use common_meta::key::{TableMetadataManager, TableMetadataManagerRef};
+use common_meta::kv_backend::KvBackendRef;
 use common_meta::table_name::TableName;
 use common_query::Output;
 use common_time::range::TimestampRange;
 use common_time::Timestamp;
 use datanode::instance::sql::{idents_to_full_database_name, table_idents_to_full_name};
+use partition::manager::{PartitionRuleManager, PartitionRuleManagerRef};
 use query::parser::QueryStatement;
 use query::plan::LogicalPlan;
 use query::query_engine::SqlStatementExecutorRef;
@@ -56,8 +58,8 @@ use table::TableRef;
 
 use crate::catalog::FrontendCatalogManager;
 use crate::error::{
-    self, CatalogSnafu, ExecLogicalPlanSnafu, ExecuteStatementSnafu, ExternalSnafu, InsertSnafu,
-    PlanStatementSnafu, RequestDatanodeSnafu, Result, TableNotFoundSnafu,
+    self, CatalogSnafu, ExecLogicalPlanSnafu, ExternalSnafu, InsertSnafu, PlanStatementSnafu,
+    RequestDatanodeSnafu, Result, TableNotFoundSnafu,
 };
 use crate::expr_factory;
 use crate::inserter::req_convert::TableToRegion;
@@ -72,6 +74,7 @@ pub struct StatementExecutor {
     region_request_handler: RegionRequestHandlerRef,
     ddl_executor: DdlTaskExecutorRef,
     table_metadata_manager: TableMetadataManagerRef,
+    partition_manager: PartitionRuleManagerRef,
     cache_invalidator: CacheInvalidatorRef,
 }
 
@@ -82,7 +85,7 @@ impl StatementExecutor {
         sql_stmt_executor: SqlStatementExecutorRef,
         region_request_handler: RegionRequestHandlerRef,
         ddl_task_executor: DdlTaskExecutorRef,
-        table_metadata_manager: TableMetadataManagerRef,
+        kv_backend: KvBackendRef,
         cache_invalidator: CacheInvalidatorRef,
     ) -> Self {
         Self {
@@ -91,7 +94,8 @@ impl StatementExecutor {
             sql_stmt_executor,
             region_request_handler,
             ddl_executor: ddl_task_executor,
-            table_metadata_manager,
+            table_metadata_manager: Arc::new(TableMetadataManager::new(kv_backend.clone())),
+            partition_manager: Arc::new(PartitionRuleManager::new(kv_backend)),
             cache_invalidator,
         }
     }
@@ -175,11 +179,33 @@ impl StatementExecutor {
                 self.truncate_table(table_name).await
             }
 
-            Statement::CreateDatabase(_) | Statement::ShowCreateTable(_) => self
-                .sql_stmt_executor
-                .execute_sql(stmt, query_ctx)
-                .await
-                .context(ExecuteStatementSnafu),
+            Statement::CreateDatabase(stmt) => {
+                let expr = CreateDatabaseExpr {
+                    database_name: stmt.name.to_string(),
+                    create_if_not_exists: stmt.if_not_exists,
+                    options: Default::default(),
+                };
+                self.create_database(query_ctx.current_catalog(), expr)
+                    .await
+            }
+
+            Statement::ShowCreateTable(show) => {
+                let (catalog, schema, table) =
+                    table_idents_to_full_name(&show.table_name, query_ctx.clone())
+                        .map_err(BoxedError::new)
+                        .context(error::ExternalSnafu)?;
+
+                let table_ref = self
+                    .catalog_manager
+                    .table(&catalog, &schema, &table)
+                    .await
+                    .context(error::CatalogSnafu)?
+                    .context(error::TableNotFoundSnafu { table_name: &table })?;
+                let table_name = TableName::new(catalog, schema, table);
+
+                self.show_create_table(table_name, table_ref, query_ctx)
+                    .await
+            }
         }
     }
 

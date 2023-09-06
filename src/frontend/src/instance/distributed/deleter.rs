@@ -126,14 +126,12 @@ impl DistDeleter {
                 .find_table_route(table_id)
                 .await
                 .with_context(|_| FindTableRouteSnafu { table_id })?;
+            let region_map = table_route.region_map();
 
             for (region_number, delete) in split {
-                let datanode =
-                    table_route
-                        .find_region_leader(region_number)
-                        .context(FindDatanodeSnafu {
-                            region: region_number,
-                        })?;
+                let datanode = *region_map.get(&region_number).context(FindDatanodeSnafu {
+                    region: region_number,
+                })?;
                 let table_name = TableName::new(&self.catalog, &self.schema, &table_name);
                 let delete =
                     to_grpc_delete_request(table_meta, &table_name, region_number, delete)?;
