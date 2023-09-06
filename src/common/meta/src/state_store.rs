@@ -100,9 +100,8 @@ impl StateStore for KvStateStore {
         );
 
         let stream = stream.map(move |r| {
-            let path = path.clone();
             r.map_err(BoxedError::new)
-                .with_context(|_| ListStateSnafu { path })
+                .with_context(|_| ListStateSnafu { path: path.clone() })
         });
 
         Ok(Box::pin(stream))
