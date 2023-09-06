@@ -348,7 +348,7 @@ async fn handle_create_table_task(
 
     Ok(SubmitDdlTaskResponse {
         key: id.to_string().into(),
-        table_id,
+        table_id: Some(table_id),
     })
 }
 
