@@ -19,6 +19,7 @@ use catalog::CatalogManagerRef;
 use clap::Parser;
 use common_base::Plugins;
 use common_config::{kv_store_dir, KvStoreConfig, WalConfig};
+use common_meta::key::TableMetadataManager;
 use common_meta::kv_backend::KvBackendRef;
 use common_procedure::ProcedureManagerRef;
 use common_telemetry::info;
@@ -315,6 +316,11 @@ impl StartCommand {
             .await
             .context(StartDatanodeSnafu)?;
         let region_server = datanode.region_server();
+
+        TableMetadataManager::new(kv_store.clone())
+            .init()
+            .await
+            .unwrap();
 
         let catalog_manager = Arc::new(FrontendCatalogManager::new(
             kv_store.clone(),

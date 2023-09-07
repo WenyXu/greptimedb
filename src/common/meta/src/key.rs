@@ -58,6 +58,7 @@ pub mod table_route;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use common_catalog::consts::{DEFAULT_CATALOG_NAME, DEFAULT_SCHEMA_NAME};
 use datanode_table::{DatanodeTableKey, DatanodeTableManager, DatanodeTableValue};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -67,8 +68,8 @@ use table::metadata::{RawTableInfo, TableId};
 use table_info::{TableInfoKey, TableInfoManager, TableInfoValue};
 use table_name::{TableNameKey, TableNameManager, TableNameValue};
 
-use self::catalog_name::{CatalogManager, CatalogNameValue};
-use self::schema_name::{SchemaManager, SchemaNameValue};
+use self::catalog_name::{CatalogManager, CatalogNameKey, CatalogNameValue};
+use self::schema_name::{SchemaManager, SchemaNameKey, SchemaNameValue};
 use self::table_route::{TableRouteManager, TableRouteValue};
 use crate::error::{self, Result, SerdeJsonSnafu};
 #[allow(deprecated)]
@@ -164,6 +165,21 @@ impl TableMetadataManager {
             table_route_manager: TableRouteManager::new(kv_backend.clone()),
             kv_backend,
         }
+    }
+
+    pub async fn init(&self) -> Result<()> {
+        self.catalog_manager()
+            .create(CatalogNameKey::new(DEFAULT_CATALOG_NAME))
+            .await?;
+
+        self.schema_manager()
+            .create(
+                SchemaNameKey::new(DEFAULT_CATALOG_NAME, DEFAULT_SCHEMA_NAME),
+                None,
+            )
+            .await?;
+
+        Ok(())
     }
 
     pub fn table_name_manager(&self) -> &TableNameManager {

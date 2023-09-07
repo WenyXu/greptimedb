@@ -132,10 +132,11 @@ impl TableCreator for StandaloneTableCreator {
     async fn create(
         &self,
         _ctx: &TableCreatorContext,
-        _raw_table_info: &mut RawTableInfo,
+        raw_table_info: &mut RawTableInfo,
         partitions: &[Partition],
     ) -> MetaResult<(TableId, Vec<RegionRoute>)> {
         let table_id = self.table_id_sequence.next().await? as u32;
+        raw_table_info.ident.table_id = table_id;
         let region_routes = partitions
             .iter()
             .enumerate()

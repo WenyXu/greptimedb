@@ -371,7 +371,7 @@ impl Default for DatanodeOptions {
             meta_client_options: None,
             wal: WalConfig::default(),
             storage: StorageConfig::default(),
-            region_engine: vec![],
+            region_engine: vec![RegionEngineConfig::Mito(MitoConfig::default())],
             logging: LoggingOptions::default(),
             heartbeat: HeartbeatOptions::default(),
             enable_telemetry: true,
@@ -393,6 +393,15 @@ impl DatanodeOptions {
 pub enum RegionEngineConfig {
     #[serde(rename = "mito")]
     Mito(MitoConfig),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RegionEngineConfigs(pub Vec<RegionEngineConfig>);
+
+impl Default for RegionEngineConfigs {
+    fn default() -> Self {
+        RegionEngineConfigs(vec![RegionEngineConfig::Mito(MitoConfig::default())])
+    }
 }
 
 /// Datanode service.
@@ -428,7 +437,9 @@ impl Datanode {
         let log_store = Self::build_log_store(&opts).await?;
         let object_store = store::new_object_store(&opts).await?;
         let engines = Self::build_store_engines(&opts, log_store, object_store).await?;
+        info!("Start to registering engines");
         for engine in engines {
+            info!("Registering engine: {}", engine.name());
             region_server.register_engine(engine);
         }
 
