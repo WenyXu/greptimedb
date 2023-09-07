@@ -92,11 +92,15 @@ pub struct StandaloneOptions {
     pub opentsdb_options: OpentsdbOptions,
     pub influxdb_options: InfluxdbOptions,
     pub prom_store_options: PromStoreOptions,
-    pub wal: WalConfig,
-    pub storage: StorageConfig,
-    pub kv_store: KvStoreConfig,
-    pub procedure: ProcedureConfig,
-    pub logging: LoggingOptions,
+    #[serde(alias = "wal")]
+    pub wal_config: WalConfig,
+    #[serde(alias = "storage")]
+    pub storage_config: StorageConfig,
+    pub kv_store_config: KvStoreConfig,
+    #[serde(alias = "procedure")]
+    pub procedure_config: ProcedureConfig,
+    #[serde(alias = "logging")]
+    pub logging_options: LoggingOptions,
 }
 
 impl Default for StandaloneOptions {
@@ -111,11 +115,11 @@ impl Default for StandaloneOptions {
             opentsdb_options: OpentsdbOptions::default(),
             influxdb_options: InfluxdbOptions::default(),
             prom_store_options: PromStoreOptions::default(),
-            wal: WalConfig::default(),
-            storage: StorageConfig::default(),
-            kv_store: KvStoreConfig::default(),
-            procedure: ProcedureConfig::default(),
-            logging: LoggingOptions::default(),
+            wal_config: WalConfig::default(),
+            storage_config: StorageConfig::default(),
+            kv_store_config: KvStoreConfig::default(),
+            procedure_config: ProcedureConfig::default(),
+            logging_options: LoggingOptions::default(),
         }
     }
 }
@@ -132,7 +136,7 @@ impl StandaloneOptions {
             influxdb_options: self.influxdb_options,
             prom_store_options: self.prom_store_options,
             meta_client_options: None,
-            logging: self.logging,
+            logging: self.logging_options,
             ..Default::default()
         }
     }
@@ -140,8 +144,8 @@ impl StandaloneOptions {
     fn datanode_options(self) -> DatanodeOptions {
         DatanodeOptions {
             enable_telemetry: self.enable_telemetry,
-            wal: self.wal,
-            storage: self.storage,
+            wal: self.wal_config,
+            storage: self.storage_config,
             ..Default::default()
         }
     }
@@ -217,11 +221,11 @@ impl StartCommand {
         opts.mode = Mode::Standalone;
 
         if let Some(dir) = top_level_options.log_dir {
-            opts.logging.dir = dir;
+            opts.logging_options.dir = dir;
         }
 
         if top_level_options.log_level.is_some() {
-            opts.logging.level = top_level_options.log_level;
+            opts.logging_options.level = top_level_options.log_level;
         }
 
         let tls_opts = TlsOption::new(
@@ -268,10 +272,10 @@ impl StartCommand {
         if self.influxdb_enable {
             opts.influxdb_options.enable = self.influxdb_enable;
         }
-        let kv_store_cfg = opts.kv_store.clone();
-        let procedure_cfg = opts.procedure.clone();
+        let kv_store_cfg = opts.kv_store_config.clone();
+        let procedure_cfg = opts.procedure_config.clone();
         let fe_opts = opts.clone().frontend_options();
-        let logging_opts = opts.logging.clone();
+        let logging_opts = opts.logging_options.clone();
         let dn_opts = opts.datanode_options();
 
         Ok(Options::Standalone(Box::new(MixOptions {
