@@ -19,7 +19,7 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use common_datasource::compression::CompressionType;
 use common_telemetry::logging;
-use futures::TryStreamExt;
+use futures_util::TryStreamExt;
 use lazy_static::lazy_static;
 use object_store::{raw_normalize_path, util, Entry, ErrorKind, ObjectStore};
 use regex::Regex;
@@ -177,7 +177,7 @@ impl ManifestObjectStore {
     {
         let streamer = self
             .object_store
-            .list(&self.path)
+            .lister_with(&self.path)
             .await
             .context(ListObjectsSnafu { path: &self.path })?;
         streamer
