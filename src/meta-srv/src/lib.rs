@@ -14,6 +14,7 @@
 
 #![feature(async_closure)]
 #![feature(result_flattening)]
+#![feature(assert_matches)]
 
 pub mod bootstrap;
 mod cache_invalidator;
@@ -33,6 +34,7 @@ pub mod procedure;
 pub mod pubsub;
 pub mod selector;
 pub mod service;
+pub mod state;
 pub mod table_meta_alloc;
 pub mod table_routes;
 

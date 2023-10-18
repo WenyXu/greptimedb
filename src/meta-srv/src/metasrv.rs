@@ -46,7 +46,9 @@ use crate::lock::DistLockRef;
 use crate::pubsub::{PublishRef, SubscribeManagerRef};
 use crate::selector::{Selector, SelectorType};
 use crate::service::mailbox::MailboxRef;
-use crate::service::store::kv::{KvStoreRef, ResettableKvStoreRef};
+use crate::service::store::cached_kv::LeaderCachedKvStore;
+use crate::service::store::kv::{KvStoreRef, ResettableKvStore, ResettableKvStoreRef};
+use crate::state::{become_follower, become_leader, StateRef};
 pub const TABLE_ID_SEQ: &str = "table_id";
 pub const METASRV_HOME: &str = "/tmp/metasrv";
 
@@ -176,10 +178,20 @@ pub struct MetaStateHandler {
     procedure_manager: ProcedureManagerRef,
     subscribe_manager: Option<SubscribeManagerRef>,
     greptimedb_telemetry_task: Arc<GreptimeDBTelemetryTask>,
+    leader_cached_kv_store: Arc<LeaderCachedKvStore>,
+    state: StateRef,
 }
 
 impl MetaStateHandler {
     pub async fn on_become_leader(&self) {
+        self.state.write().unwrap().next_state(become_leader(false));
+
+        if let Err(e) = self.leader_cached_kv_store.load().await {
+            error!(e; "Failed to load kv into leader cache kv store");
+        } else {
+            self.state.write().unwrap().next_state(become_leader(true));
+        }
+
         if let Err(e) = self.procedure_manager.start().await {
             error!(e; "Failed to start procedure manager");
         }
@@ -187,6 +199,8 @@ impl MetaStateHandler {
     }
 
     pub async fn on_become_follower(&self) {
+        self.state.write().unwrap().next_state(become_follower());
+
         // Stops the procedures.
         if let Err(e) = self.procedure_manager.stop().await {
             error!(e; "Failed to stop procedure manager");
@@ -205,13 +219,14 @@ impl MetaStateHandler {
 
 #[derive(Clone)]
 pub struct MetaSrv {
+    state: StateRef,
     started: Arc<AtomicBool>,
     options: MetaSrvOptions,
     // It is only valid at the leader node and is used to temporarily
     // store some data that will not be persisted.
     in_memory: ResettableKvStoreRef,
     kv_store: KvStoreRef,
-    leader_cached_kv_store: ResettableKvStoreRef,
+    leader_cached_kv_store: Arc<LeaderCachedKvStore>,
     table_id_sequence: SequenceRef,
     meta_peer_client: MetaPeerClientRef,
     selector: SelectorRef,
@@ -254,6 +269,8 @@ impl MetaSrv {
                 greptimedb_telemetry_task,
                 subscribe_manager,
                 procedure_manager,
+                state: self.state.clone(),
+                leader_cached_kv_store: leader_cached_kv_store.clone(),
             };
             let _handle = common_runtime::spawn_bg(async move {
                 loop {
@@ -302,6 +319,8 @@ impl MetaSrv {
                 info!("MetaSrv stopped");
             });
         } else {
+            // Always load kv into cached kv store.
+            self.leader_cached_kv_store.load().await?;
             self.procedure_manager
                 .start()
                 .await
@@ -338,10 +357,6 @@ impl MetaSrv {
 
     pub fn kv_store(&self) -> &KvStoreRef {
         &self.kv_store
-    }
-
-    pub fn leader_cached_kv_store(&self) -> &ResettableKvStoreRef {
-        &self.leader_cached_kv_store
     }
 
     pub fn meta_peer_client(&self) -> &MetaPeerClientRef {
