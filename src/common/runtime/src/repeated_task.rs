@@ -63,6 +63,32 @@ impl From<Duration> for Box<dyn IntervalGenerator> {
     }
 }
 
+pub struct ImmediatelyInterval {
+    first: bool,
+    interval: Duration,
+}
+
+#[allow(dead_code)]
+impl ImmediatelyInterval {
+    pub fn new(interval: Duration) -> Self {
+        Self {
+            first: false,
+            interval,
+        }
+    }
+}
+
+impl IntervalGenerator for ImmediatelyInterval {
+    fn next(&mut self) -> Duration {
+        if !self.first {
+            self.first = true;
+            Duration::ZERO
+        } else {
+            self.interval
+        }
+    }
+}
+
 pub struct RepeatedTask<E> {
     name: String,
     cancel_token: CancellationToken,
