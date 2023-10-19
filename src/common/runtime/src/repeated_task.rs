@@ -20,6 +20,7 @@ use common_error::ext::ErrorExt;
 use common_telemetry::logging;
 use snafu::{ensure, ResultExt};
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{IllegalStateSnafu, Result, WaitGcTaskStopSnafu};
@@ -42,6 +43,24 @@ struct TaskInner<E> {
     task_handle: Option<JoinHandle<()>>,
     /// The task_fn to run. This is Some if the task is not started.
     task_fn: Option<BoxedTaskFunction<E>>,
+    /// Generates the next interval.
+    interval_generator: Option<Box<dyn IntervalGenerator>>,
+}
+
+pub trait IntervalGenerator: Send + Sync {
+    fn next(&mut self) -> Duration;
+}
+
+impl IntervalGenerator for Duration {
+    fn next(&mut self) -> Duration {
+        *self
+    }
+}
+
+impl From<Duration> for Box<dyn IntervalGenerator> {
+    fn from(value: Duration) -> Self {
+        Box::new(value)
+    }
 }
 
 pub struct RepeatedTask<E> {
@@ -49,7 +68,6 @@ pub struct RepeatedTask<E> {
     cancel_token: CancellationToken,
     inner: Mutex<TaskInner<E>>,
     started: AtomicBool,
-    interval: Duration,
 }
 
 impl<E> std::fmt::Display for RepeatedTask<E> {
@@ -75,16 +93,19 @@ impl<E> Drop for RepeatedTask<E> {
 }
 
 impl<E: ErrorExt + 'static> RepeatedTask<E> {
-    pub fn new(interval: Duration, task_fn: BoxedTaskFunction<E>) -> Self {
+    pub fn new<I: Into<Box<dyn IntervalGenerator>>>(
+        interval: I,
+        task_fn: BoxedTaskFunction<E>,
+    ) -> Self {
         Self {
             name: task_fn.name().to_string(),
             cancel_token: CancellationToken::new(),
             inner: Mutex::new(TaskInner {
                 task_handle: None,
                 task_fn: Some(task_fn),
+                interval_generator: Some(interval.into()),
             }),
             started: AtomicBool::new(false),
-            interval,
         }
     }
 
@@ -99,15 +120,22 @@ impl<E: ErrorExt + 'static> RepeatedTask<E> {
             IllegalStateSnafu { name: &self.name }
         );
 
-        let interval = self.interval;
         let child = self.cancel_token.child_token();
         // Safety: The task is not started.
         let mut task_fn = inner.task_fn.take().unwrap();
+        let mut interval_generator = inner.interval_generator.take().unwrap();
+        let interval = interval_generator.next();
+
         // TODO(hl): Maybe spawn to a blocking runtime.
         let handle = runtime.spawn(async move {
+            let sleep = tokio::time::sleep(interval);
+            tokio::pin!(sleep);
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(interval) => {}
+                    _ = &mut sleep => {
+                        let interval = interval_generator.next();
+                        sleep.as_mut().reset(Instant::now() + interval);
+                    }
                     _ = child.cancelled() => {
                         return;
                     }
@@ -123,7 +151,7 @@ impl<E: ErrorExt + 'static> RepeatedTask<E> {
         logging::debug!(
             "Repeated task {} started with interval: {:?}",
             self.name,
-            self.interval
+            interval
         );
 
         Ok(())
