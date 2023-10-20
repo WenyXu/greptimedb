@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
+use common_meta::key::CACHE_KEY_PREFIXES;
 use common_meta::kv_backend::txn::{Txn, TxnOp, TxnRequest, TxnResponse};
 use common_meta::kv_backend::{KvBackend, TxnService};
 use common_meta::rpc::store::{
@@ -91,15 +92,20 @@ impl LeaderCachedKvStore {
 
     /// The caller MUST ensure during the loading, there are no mutation requests reaching the `LeaderCachedKvStore`.
     pub async fn load(&self) -> Result<()> {
-        let _timer = timer!(METRIC_META_LEADER_CACHED_KV_LOAD);
+        for prefix in &CACHE_KEY_PREFIXES[..] {
+            let _timer = timer!(METRIC_META_LEADER_CACHED_KV_LOAD, &[("prefix", *prefix)]);
 
-        let result = self.store.range(RangeRequest::new().with_all()).await?;
-        self.cache
-            .batch_put(BatchPutRequest {
-                kvs: result.kvs,
-                prev_kv: false,
-            })
-            .await?;
+            let result = self
+                .store
+                .range(RangeRequest::new().with_prefix(prefix.as_bytes()))
+                .await?;
+            self.cache
+                .batch_put(BatchPutRequest {
+                    kvs: result.kvs,
+                    prev_kv: false,
+                })
+                .await?;
+        }
 
         Ok(())
     }
