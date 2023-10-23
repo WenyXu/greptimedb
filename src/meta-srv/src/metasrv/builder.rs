@@ -37,7 +37,6 @@ use crate::handler::failure_handler::RegionFailureHandler;
 use crate::handler::filter_inactive_region_stats::FilterInactiveRegionStatsHandler;
 use crate::handler::keep_lease_handler::KeepLeaseHandler;
 use crate::handler::mailbox_handler::MailboxHandler;
-use crate::handler::on_leader_start_handler::OnLeaderStartHandler;
 use crate::handler::persist_stats_handler::PersistStatsHandler;
 use crate::handler::publish_heartbeat_handler::PublishHeartbeatHandler;
 use crate::handler::region_lease_handler::RegionLeaseHandler;
@@ -232,7 +231,6 @@ impl MetaSrvBuilder {
                 // still help the datanode to keep lease.
                 group.add_handler(KeepLeaseHandler).await;
                 group.add_handler(CheckLeaderHandler).await;
-                group.add_handler(OnLeaderStartHandler).await;
                 group.add_handler(CollectStatsHandler).await;
                 group.add_handler(MailboxHandler).await;
                 group.add_handler(region_lease_handler).await;

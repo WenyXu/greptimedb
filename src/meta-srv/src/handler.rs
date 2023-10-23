@@ -47,7 +47,6 @@ pub mod filter_inactive_region_stats;
 pub mod keep_lease_handler;
 pub mod mailbox_handler;
 pub mod node_stat;
-pub mod on_leader_start_handler;
 pub mod persist_stats_handler;
 pub mod publish_heartbeat_handler;
 pub mod region_lease_handler;
@@ -414,7 +413,6 @@ mod tests {
     use crate::handler::check_leader_handler::CheckLeaderHandler;
     use crate::handler::collect_stats_handler::CollectStatsHandler;
     use crate::handler::mailbox_handler::MailboxHandler;
-    use crate::handler::on_leader_start_handler::OnLeaderStartHandler;
     use crate::handler::persist_stats_handler::PersistStatsHandler;
     use crate::handler::response_header_handler::ResponseHeaderHandler;
     use crate::handler::{HeartbeatHandlerGroup, HeartbeatMailbox, Pusher};
@@ -492,19 +490,26 @@ mod tests {
         let group = HeartbeatHandlerGroup::default();
         group.add_handler(ResponseHeaderHandler).await;
         group.add_handler(CheckLeaderHandler).await;
-        group.add_handler(OnLeaderStartHandler).await;
         group.add_handler(CollectStatsHandler).await;
         group.add_handler(MailboxHandler).await;
         group.add_handler(PersistStatsHandler::default()).await;
 
         let handlers = group.handlers.read().await;
 
-        assert_eq!(6, handlers.len());
-        assert_eq!("ResponseHeaderHandler", handlers[0].handler.name());
-        assert_eq!("CheckLeaderHandler", handlers[1].handler.name());
-        assert_eq!("OnLeaderStartHandler", handlers[2].handler.name());
-        assert_eq!("CollectStatsHandler", handlers[3].handler.name());
-        assert_eq!("MailboxHandler", handlers[4].handler.name());
-        assert_eq!("PersistStatsHandler", handlers[5].handler.name());
+        let names = handlers
+            .iter()
+            .map(|h| h.handler.name())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            vec![
+                "ResponseHeaderHandler",
+                "CheckLeaderHandler",
+                "CollectStatsHandler",
+                "MailboxHandler",
+                "PersistStatsHandler"
+            ],
+            names
+        );
     }
 }
