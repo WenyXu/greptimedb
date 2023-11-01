@@ -437,6 +437,27 @@ impl TableMetadataManager {
         Ok(())
     }
 
+    /// Creates [TableRouteValue].
+    ///
+    /// Only used for test purpose.
+    #[cfg(feature = "testing")]
+    pub async fn create_table_route(
+        &self,
+        table_id: TableId,
+        region_routes: Vec<RegionRoute>,
+    ) -> Result<()> {
+        let table_route_value = TableRouteValue::new(region_routes);
+        let (create_table_route_txn, _) = self
+            .table_route_manager()
+            .build_create_txn(table_id, &table_route_value)?;
+
+        let r = self.kv_backend.txn(create_table_route_txn).await?;
+
+        assert!(r.succeeded);
+
+        Ok(())
+    }
+
     /// Deletes metadata for table.
     /// The caller MUST ensure it has the exclusive access to `TableNameKey`.
     pub async fn delete_table_metadata(

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "load-cache",
     "benchmarks",
     "src/api",
     "src/auth",

@@ -1,0 +1,18 @@
+[package]
+name = "load-cache"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = { workspace = true }
+clap = { version = "4.4", features = ["derive"] }
+common-base = { workspace = true }
+common-meta = { workspace = true, features = ["testing"] }
+common-telemetry = { workspace = true }
+futures = { workspace = true }
+meta-srv = { workspace = true }
+store-api = { workspace = true }
+tokio = { workspace = true }
