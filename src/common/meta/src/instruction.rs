@@ -131,7 +131,7 @@ pub struct UpgradeRegion {
     ///
     /// `None` stands for no wait,
     /// it's helpful to verify whether the leader region is ready.
-    pub wait_for_replay_mills: Option<u64>,
+    pub wait_for_replay_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Display)]
@@ -158,11 +158,11 @@ pub enum Instruction {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct UpgradeRegionReply {
     /// Returns true if `last_entry_id` has been replayed to the latest.
-    ready: bool,
+    pub ready: bool,
     /// Indicates whether the region exists.
-    exists: bool,
+    pub exists: bool,
     /// Returns error if any.
-    error: Option<String>,
+    pub error: Option<String>,
 }
 
 impl Display for UpgradeRegionReply {

@@ -129,6 +129,8 @@ impl TestingEnv {
     }
 }
 
+
+/// Generates a [InstructionReply::CloseRegion] reply.
 pub fn new_close_region_reply(id: u64) -> MailboxMessage {
     MailboxMessage {
         id,
@@ -146,6 +148,7 @@ pub fn new_close_region_reply(id: u64) -> MailboxMessage {
     }
 }
 
+/// Sends a mock reply.
 pub fn send_mock_reply(
     mailbox: MailboxRef,
     mut rx: MockHeartbeatReceiver,
