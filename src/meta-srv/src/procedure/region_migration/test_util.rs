@@ -129,7 +129,6 @@ impl TestingEnv {
     }
 }
 
-
 /// Generates a [InstructionReply::CloseRegion] reply.
 pub fn new_close_region_reply(id: u64) -> MailboxMessage {
     MailboxMessage {

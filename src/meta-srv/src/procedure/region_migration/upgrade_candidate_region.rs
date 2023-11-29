@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use api::v1::meta::MailboxMessage;
 use common_meta::instruction::{Instruction, InstructionReply, UpgradeRegion, UpgradeRegionReply};
+use common_procedure::Status;
 use common_telemetry::warn;
 use serde::{Deserialize, Serialize};
 use snafu::{ensure, ResultExt};
@@ -55,11 +56,11 @@ impl Default for UpgradeCandidateRegion {
 #[async_trait::async_trait]
 #[typetag::serde]
 impl State for UpgradeCandidateRegion {
-    async fn next(&mut self, ctx: &mut Context) -> Result<Box<dyn State>> {
+    async fn next(&mut self, ctx: &mut Context) -> Result<(Box<dyn State>, Status)> {
         if self.upgrade_region_with_retry(ctx).await {
-            Ok(Box::new(UpdateMetadata::Upgrade))
+            Ok((Box::new(UpdateMetadata::Upgrade), Status::executing(false)))
         } else {
-            Ok(Box::new(UpdateMetadata::Rollback))
+            Ok((Box::new(UpdateMetadata::Rollback), Status::executing(false)))
         }
     }
 
@@ -492,7 +493,7 @@ mod tests {
                 .unwrap();
         });
 
-        let next = state.next(&mut ctx).await.unwrap();
+        let (next, _) = state.next(&mut ctx).await.unwrap();
 
         let update_metadata = next.as_any().downcast_ref::<UpdateMetadata>().unwrap();
 
@@ -551,7 +552,7 @@ mod tests {
                 .unwrap();
         });
 
-        let next = state.next(&mut ctx).await.unwrap();
+        let (next, _) = state.next(&mut ctx).await.unwrap();
 
         let update_metadata = next.as_any().downcast_ref::<UpdateMetadata>().unwrap();
         assert_matches!(update_metadata, UpdateMetadata::Rollback);

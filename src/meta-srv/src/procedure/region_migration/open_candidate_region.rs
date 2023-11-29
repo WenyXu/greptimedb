@@ -20,6 +20,7 @@ use api::v1::meta::MailboxMessage;
 use common_meta::ddl::utils::region_storage_path;
 use common_meta::instruction::{Instruction, InstructionReply, OpenRegion, SimpleReply};
 use common_meta::RegionIdent;
+use common_procedure::Status;
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, ResultExt};
 
@@ -37,11 +38,14 @@ pub struct OpenCandidateRegion;
 #[async_trait::async_trait]
 #[typetag::serde]
 impl State for OpenCandidateRegion {
-    async fn next(&mut self, ctx: &mut Context) -> Result<Box<dyn State>> {
+    async fn next(&mut self, ctx: &mut Context) -> Result<(Box<dyn State>, Status)> {
         let instruction = self.build_open_region_instruction(ctx).await?;
         self.open_candidate_region(ctx, instruction).await?;
 
-        Ok(Box::<DowngradeLeaderRegion>::default())
+        Ok((
+            Box::<DowngradeLeaderRegion>::default(),
+            Status::executing(false),
+        ))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -429,7 +433,7 @@ mod tests {
 
         send_mock_reply(mailbox, rx, |id| Ok(new_open_region_reply(id, true, None)));
 
-        let next = state.next(&mut ctx).await.unwrap();
+        let (next, _) = state.next(&mut ctx).await.unwrap();
         let vc = ctx.volatile_ctx;
         assert_eq!(
             vc.opening_region_guard.unwrap().info(),
