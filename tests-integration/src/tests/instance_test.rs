@@ -644,6 +644,39 @@ async fn test_execute_external_create_with_invalid_ts(instance: Arc<dyn MockInst
 }
 
 #[apply(both_instances_cases)]
+async fn test_copy_from_parquet_with_typecast(instance: Arc<dyn MockInstance>) {
+    common_telemetry::init_default_ut_logging();
+    let table_name = "test_casting";
+    let create_table_sql = format!(
+        r#"create table {table_name}
+        (hostname STRING, 
+            environment STRING, 
+            usage_user DOUBLE, 
+            usage_system DOUBLE, 
+            usage_idle DOUBLE, 
+            usage_nice DOUBLE, 
+            usage_iowait DOUBLE, 
+            usage_irq DOUBLE, 
+            usage_softirq DOUBLE, 
+            usage_steal DOUBLE, 
+            usage_guest DOUBLE, 
+            usage_guest_nice DOUBLE, 
+            ts TIMESTAMP TIME INDEX, 
+            PRIMARY KEY(hostname)
+        );"#
+    );
+    let instance = instance.frontend();
+    let output = execute_sql(&instance, &create_table_sql).await;
+    assert!(matches!(output, Output::AffectedRows(0)));
+
+    let location = "s3://your-bucket/weny-test-import/tsbs.data";
+    let copy_table_from_sql = format!(
+        r#"copy {table_name} from '{location}' WITH(FORMAT='parquet') CONNECTION(ACCESS_KEY_ID='',SECRET_ACCESS_KEY='',REGION='');"#
+    );
+    let _ = execute_sql(&instance, &copy_table_from_sql).await;
+}
+
+#[apply(both_instances_cases)]
 async fn test_execute_query_external_table_parquet(instance: Arc<dyn MockInstance>) {
     std::env::set_var("TZ", "UTC");
 
