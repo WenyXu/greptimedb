@@ -44,8 +44,26 @@ pub fn normalize_dir(dir: &str) -> String {
 pub fn join_dir(parent: &str, child: &str) -> String {
     // Always adds a `/` to the output path.
     let output = format!("{parent}/{child}/");
-    // We call opendal's normalize_root which keep the last `/`.
-    opendal::raw::normalize_root(&output)
+    normalize_root(&output)
+}
+
+/// Modified from the `opendal::raw::normalize_root`
+fn normalize_root(v: &str) -> String {
+    let mut v = v
+        .split('/')
+        .filter(|v| !v.is_empty())
+        .collect::<Vec<&str>>()
+        .join("/");
+    #[cfg(not(windows))]
+    {
+        if !v.starts_with('/') {
+            v.insert(0, '/');
+        }
+    }
+    if !v.ends_with('/') {
+        v.push('/')
+    }
+    v
 }
 
 /// Push `child` to `parent` dir and normalize the output path.
