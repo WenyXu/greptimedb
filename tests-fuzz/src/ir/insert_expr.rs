@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use datatypes::value::Value;
+use serde::{Deserialize, Serialize};
 
 use crate::ir::Column;
 
 pub type RowValue = Vec<Value>;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertIntoExpr {
     pub table_name: String,
     pub columns: Vec<Column>,

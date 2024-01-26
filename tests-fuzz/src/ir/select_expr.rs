@@ -14,8 +14,11 @@
 
 use std::fmt::Display;
 
+use serde::{Deserialize, Serialize};
+
 use crate::ir::Column;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Direction {
     Asc,
     Desc,
@@ -30,6 +33,7 @@ impl Display for Direction {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectExpr {
     pub table_name: String,
     pub columns: Vec<Column>,
