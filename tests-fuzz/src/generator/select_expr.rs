@@ -46,7 +46,11 @@ impl<R: Rng + 'static> Generator<SelectExpr, R> for SelectExprGenerator<R> {
             .collect::<Vec<_>>();
         selected_columns.shuffle(rng);
 
-        let order_by_selection = rng.gen_range(1..selection);
+        let order_by_selection = if selection != 1 {
+            rng.gen_range(1..selection)
+        } else {
+            selection
+        };
 
         let order_by = selected_columns
             .choose_multiple(rng, order_by_selection)

@@ -48,7 +48,7 @@ impl InsertIntoExprTranslator {
                 format!(
                     "({})",
                     row.iter()
-                        .map(|v| format!("'{v}'"))
+                        .map(|v| v.to_string())
                         .collect::<Vec<_>>()
                         .join(", ")
                 )

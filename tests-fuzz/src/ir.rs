@@ -24,9 +24,11 @@ pub use create_expr::CreateTableExpr;
 use datatypes::data_type::ConcreteDataType;
 use datatypes::value::Value;
 use derive_builder::Builder;
+pub use insert_expr::InsertIntoExpr;
 use lazy_static::lazy_static;
 use rand::seq::SliceRandom;
 use rand::Rng;
+pub use select_expr::SelectExpr;
 use serde::{Deserialize, Serialize};
 
 use crate::generator::Random;
@@ -91,7 +93,7 @@ pub fn generate_random_value<R: Rng>(
         },
         ConcreteDataType::Date(_) => Value::from(rng.gen::<i32>()),
         ConcreteDataType::DateTime(_) => Value::from(rng.gen::<i64>()),
-        &ConcreteDataType::Timestamp(_) => Value::from(rng.gen::<u64>()),
+        &ConcreteDataType::Timestamp(_) => Value::from(rng.gen::<i32>()),
 
         _ => unimplemented!("unsupported type: {datatype}"),
     }
