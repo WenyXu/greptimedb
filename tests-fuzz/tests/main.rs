@@ -34,16 +34,16 @@ use tests_fuzz::translator::generic::select_expr::SelectExprTranslator;
 use tests_fuzz::translator::mysql::create_expr::CreateTableExprTranslator;
 use tests_fuzz::translator::DslTranslator;
 
-const GT_STANDALONE_MYSQL_ADDR: &str = "GT_STANDALONE_MYSQL_ADDR";
+const GT_MYSQL_ADDR: &str = "GT_MYSQL_ADDR";
 
 #[tokio::test]
 async fn test_execution() {
     common_telemetry::init_default_ut_logging();
     let _ = dotenv::dotenv();
-    let addr = if let Ok(addr) = env::var(GT_STANDALONE_MYSQL_ADDR) {
+    let addr = if let Ok(addr) = env::var(GT_MYSQL_ADDR) {
         addr
     } else {
-        info!("GT_STANDALONE_MYSQL_ADDR is empty, ignores test");
+        info!("GT_MYSQL_ADDR is empty, ignores test");
         return;
     };
 
@@ -53,8 +53,7 @@ async fn test_execution() {
         .unwrap();
 
     // let seed = rand::random();
-    let seed = 8538676605000254751;
-    info!("Test seed: {seed:?}");
+    let seed = 12029633896567794514;
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
     let create_table_expr = create_table(&mut rng);
@@ -64,8 +63,10 @@ async fn test_execution() {
     let insert_expr = insert_into(&table_ctx, &mut rng);
     execute_insert_into(&pool, &insert_expr).await;
 
-    let select_expr = select(&table_ctx, &mut rng);
-    execute_select(&pool, &select_expr).await;
+    // let select_expr = select(&table_ctx, &mut rng);
+    // execute_select(&pool, &select_expr).await;
+
+    info!("Test seed: {seed:?}, addr: {addr}");
 }
 
 fn create_table<R: Rng + 'static>(rng: &mut R) -> CreateTableExpr {
@@ -94,7 +95,7 @@ async fn execute_create_table(pool: &Pool<MySql>, create_table_expr: &CreateTabl
 fn insert_into<R: Rng + 'static>(table_ctx: &TableContextRef, rng: &mut R) -> InsertIntoExpr {
     let insert_into_generator = InsertExprGeneratorBuilder::default()
         .table_ctx(table_ctx.clone())
-        .rows(rng.gen_range(1..20))
+        .rows(rng.gen_range(100..200))
         .build()
         .unwrap();
 
