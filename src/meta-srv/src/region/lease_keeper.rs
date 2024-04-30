@@ -90,11 +90,14 @@ fn renew_region_lease_via_region_route(
 }
 
 impl RegionLeaseKeeper {
-    fn collect_tables(&self, datanode_regions: &[RegionId]) -> HashMap<TableId, Vec<RegionId>> {
+    fn collect_tables(
+        &self,
+        datanode_regions: &HashSet<RegionId>,
+    ) -> HashMap<TableId, Vec<RegionId>> {
         let mut tables = HashMap::<TableId, Vec<RegionId>>::new();
 
         // Group by `table_id`.
-        for region_id in datanode_regions.iter() {
+        for region_id in datanode_regions.into_iter() {
             let table = tables.entry(region_id.table_id()).or_default();
             table.push(*region_id);
         }
@@ -131,12 +134,12 @@ impl RegionLeaseKeeper {
     fn renew_region_lease(
         &self,
         table_metadata: &HashMap<TableId, TableRouteValue>,
+        operating_regions: &HashSet<RegionId>,
         datanode_id: DatanodeId,
         region_id: RegionId,
         role: RegionRole,
     ) -> Option<(RegionId, RegionRole)> {
-        // Renews the lease if it's a opening region or deleting region.
-        if self.memory_region_keeper.contains(datanode_id, region_id) {
+        if operating_regions.contains(&region_id) {
             return Some((region_id, role));
         }
 
@@ -166,11 +169,17 @@ impl RegionLeaseKeeper {
         datanode_id: DatanodeId,
         regions: &[(RegionId, RegionRole)],
     ) -> Result<RenewRegionLeasesResponse> {
-        let region_ids = regions
+        let mut region_ids = regions
             .iter()
             .map(|(region_id, _)| *region_id)
-            .collect::<Vec<_>>();
-        let tables = self.collect_tables(&region_ids);
+            .collect::<HashSet<_>>();
+
+        // Filters out operating region first, improves the cache hit rate(reduce expensive remote fetches).
+        let operating_regions = self
+            .memory_region_keeper
+            .filter_operating_regions(datanode_id, &mut region_ids);
+
+        let tables = self.collect_tables(&operating_regions);
         let table_ids = tables.keys().copied().collect::<Vec<_>>();
         let table_metadata = self.collect_tables_metadata(&table_ids).await?;
 
@@ -178,7 +187,13 @@ impl RegionLeaseKeeper {
         let mut non_exists = HashSet::new();
 
         for &(region, role) in regions {
-            match self.renew_region_lease(&table_metadata, datanode_id, region, role) {
+            match self.renew_region_lease(
+                &table_metadata,
+                &operating_regions,
+                datanode_id,
+                region,
+                role,
+            ) {
                 Some((region, renewed_role)) => {
                     renewed.insert(region, renewed_role);
                 }
