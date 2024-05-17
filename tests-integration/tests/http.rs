@@ -791,7 +791,6 @@ type = "experimental"
 index_max_keys_per_shard = 8192
 data_freeze_threshold = 131072
 dedup = true
-fork_dictionary_bytes = "1GiB"
 
 [[datanode.region_engine]]
 
@@ -836,6 +835,7 @@ fn drop_lines_with_inconsistent_results(input: String) -> String {
         "sst_meta_cache_size =",
         "vector_cache_size =",
         "page_cache_size =",
+        "fork_dictionary_bytes =",
     ];
 
     input
