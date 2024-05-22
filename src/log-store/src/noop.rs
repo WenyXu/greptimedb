@@ -16,6 +16,7 @@ use common_wal::options::WalOptions;
 use store_api::logstore::entry::{Entry, Id as EntryId};
 use store_api::logstore::namespace::{Id as NamespaceId, Namespace};
 use store_api::logstore::{AppendBatchResponse, AppendResponse, LogStore};
+use store_api::storage::RegionId;
 
 use crate::error::{Error, Result};
 
@@ -36,10 +37,12 @@ impl Namespace for NamespaceImpl {
 }
 
 impl Entry for EntryImpl {
-    type Error = Error;
-
     fn data(&self) -> &[u8] {
         &[]
+    }
+
+    fn region_id(&self) -> RegionId {
+        0.into()
     }
 
     fn id(&self) -> EntryId {
@@ -73,8 +76,9 @@ impl LogStore for NoopLogStore {
         &self,
         _ns: &Self::Namespace,
         _entry_id: EntryId,
-    ) -> Result<store_api::logstore::entry_stream::SendableEntryStream<'_, Self::Entry, Self::Error>>
-    {
+    ) -> Result<
+        store_api::logstore::entry_stream::SendableEntryStream<'static, Self::Entry, Self::Error>,
+    > {
         Ok(Box::pin(futures::stream::once(futures::future::ready(Ok(
             vec![],
         )))))

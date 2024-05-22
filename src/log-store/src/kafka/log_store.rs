@@ -128,7 +128,7 @@ impl LogStore for KafkaLogStore {
         &self,
         ns: &Self::Namespace,
         entry_id: EntryId,
-    ) -> Result<SendableEntryStream<Self::Entry, Self::Error>> {
+    ) -> Result<SendableEntryStream<'static, Self::Entry, Self::Error>> {
         metrics::METRIC_KAFKA_READ_CALLS_TOTAL.inc();
         let _timer = metrics::METRIC_KAFKA_READ_ELAPSED.start_timer();
 
@@ -209,12 +209,6 @@ impl LogStore for KafkaLogStore {
 
                 // Filters records by namespace.
                 let record = Record::try_from(kafka_record)?;
-                if record.meta.ns != ns_clone {
-                    if check_termination(offset, end_offset, &entry_records)? {
-                        break;
-                    }
-                    continue;
-                }
 
                 // Tries to construct an entry from records consumed so far.
                 if let Some(mut entry) = maybe_emit_entry(record, &mut entry_records)? {

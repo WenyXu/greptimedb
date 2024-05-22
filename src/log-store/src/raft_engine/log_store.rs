@@ -289,7 +289,7 @@ impl LogStore for RaftEngineLogStore {
         &self,
         ns: &Self::Namespace,
         entry_id: EntryId,
-    ) -> Result<SendableEntryStream<'_, Self::Entry, Self::Error>> {
+    ) -> Result<SendableEntryStream<'static, Self::Entry, Self::Error>> {
         metrics::METRIC_RAFT_ENGINE_READ_CALLS_TOTAL.inc();
         let _timer = metrics::METRIC_RAFT_ENGINE_READ_ELAPSED.start_timer();
 

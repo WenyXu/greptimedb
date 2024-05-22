@@ -22,7 +22,7 @@ use common_wal::options::{KafkaWalOptions, WalOptions, WAL_OPTIONS_KEY};
 use snafu::ResultExt;
 use store_api::storage::{RegionId, RegionNumber};
 
-use crate::error::{EncodeWalOptionsSnafu, Result};
+use crate::error::{self, EncodeWalOptionsSnafu, Result};
 use crate::kv_backend::KvBackendRef;
 use crate::wal_options_allocator::kafka::topic_manager::TopicManager as KafkaTopicManager;
 
@@ -110,10 +110,13 @@ pub fn prepare_wal_options(
     options: &mut HashMap<String, String>,
     region_id: RegionId,
     region_wal_options: &HashMap<RegionNumber, String>,
-) {
+) -> Result<WalOptions> {
     if let Some(wal_options) = region_wal_options.get(&region_id.region_number()) {
         options.insert(WAL_OPTIONS_KEY.to_string(), wal_options.clone());
+        return serde_json::from_str(&wal_options).context(error::DecodeJsonSnafu);
     }
+
+    Ok(WalOptions::RaftEngine)
 }
 
 #[cfg(test)]

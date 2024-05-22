@@ -816,6 +816,7 @@ mod tests {
                     region_dir: String::new(),
                     options: Default::default(),
                     skip_wal_replay: false,
+                    entry_distributor: None,
                 }),
             )
             .await

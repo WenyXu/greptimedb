@@ -40,6 +40,7 @@ impl HandlerContext {
                 region_dir: region_dir(&region_storage_path, region_id),
                 options: region_options,
                 skip_wal_replay,
+                entry_distributor: None,
             });
             let result = self.region_server.handle_request(region_id, request).await;
             let success = result.is_ok();

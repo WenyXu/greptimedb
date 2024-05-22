@@ -26,8 +26,10 @@ pub use crate::logstore::namespace::Id as NamespaceId;
 use crate::logstore::namespace::Namespace;
 
 pub mod entry;
+pub mod entry_distributor;
 pub mod entry_stream;
 pub mod namespace;
+pub mod reader;
 
 /// `LogStore` serves as a Write-Ahead-Log for storage engine.
 #[async_trait::async_trait]
@@ -55,7 +57,7 @@ pub trait LogStore: Send + Sync + 'static + std::fmt::Debug {
         &self,
         ns: &Self::Namespace,
         id: EntryId,
-    ) -> Result<SendableEntryStream<Self::Entry, Self::Error>, Self::Error>;
+    ) -> Result<SendableEntryStream<'static, Self::Entry, Self::Error>, Self::Error>;
 
     /// Creates a new `Namespace` from the given ref.
     async fn create_namespace(&self, ns: &Self::Namespace) -> Result<(), Self::Error>;

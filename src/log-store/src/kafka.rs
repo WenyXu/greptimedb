@@ -22,8 +22,7 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use store_api::logstore::entry::{Entry, Id as EntryId};
 use store_api::logstore::namespace::Namespace;
-
-use crate::error::Error;
+use store_api::storage::RegionId;
 
 /// Kafka Namespace implementation.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
@@ -56,10 +55,12 @@ pub struct EntryImpl {
 }
 
 impl Entry for EntryImpl {
-    type Error = Error;
-
     fn data(&self) -> &[u8] {
         &self.data
+    }
+
+    fn region_id(&self) -> RegionId {
+        self.ns.region_id.into()
     }
 
     fn id(&self) -> EntryId {

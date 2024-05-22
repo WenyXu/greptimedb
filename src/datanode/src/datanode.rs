@@ -14,6 +14,7 @@
 
 //! Datanode implementation.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -30,6 +31,7 @@ use common_telemetry::{error, info, warn};
 use common_wal::config::kafka::DatanodeKafkaConfig;
 use common_wal::config::raft_engine::RaftEngineConfig;
 use common_wal::config::DatanodeWalConfig;
+use common_wal::options::WalOptions;
 use file_engine::engine::FileRegionEngine;
 use futures_util::future::try_join_all;
 use futures_util::TryStreamExt;
@@ -39,6 +41,7 @@ use meta_client::client::MetaClient;
 use metric_engine::engine::MetricEngine;
 use mito2::config::MitoConfig;
 use mito2::engine::MitoEngine;
+use mito2::wal::distributor::KafkaWalEntryDistributor;
 use object_store::manager::{ObjectStoreManager, ObjectStoreManagerRef};
 use object_store::util::normalize_dir;
 use query::QueryEngineFactory;
@@ -46,6 +49,7 @@ use servers::export_metrics::ExportMetricsTask;
 use servers::server::ServerHandlers;
 use servers::Mode;
 use snafu::{OptionExt, ResultExt};
+use store_api::logstore::entry_distributor;
 use store_api::path_utils::{region_dir, WAL_DIR};
 use store_api::region_engine::RegionEngineRef;
 use store_api::region_request::{RegionOpenRequest, RegionRequest};
@@ -55,7 +59,7 @@ use tokio::sync::Notify;
 
 use crate::config::{DatanodeOptions, RegionEngineConfig};
 use crate::error::{
-    BuildMitoEngineSnafu, CreateDirSnafu, GetMetadataSnafu, MissingKvBackendSnafu,
+    self, BuildMitoEngineSnafu, CreateDirSnafu, GetMetadataSnafu, MissingKvBackendSnafu,
     MissingNodeIdSnafu, OpenLogStoreSnafu, Result, RuntimeResourceSnafu, ShutdownInstanceSnafu,
     ShutdownServerSnafu, StartServerSnafu,
 };
@@ -442,37 +446,106 @@ impl DatanodeBuilder {
     }
 }
 
+#[derive(Debug, Clone)]
+struct OpeningRegion {
+    engine: String,
+    store_path: String,
+    options: HashMap<String, String>,
+}
+
 /// Open all regions belong to this datanode.
 async fn open_all_regions(
     region_server: RegionServer,
     table_values: Vec<DatanodeTableValue>,
     open_with_writable: bool,
 ) -> Result<()> {
-    let mut regions = vec![];
+    let mut regions: HashMap<RegionId, OpeningRegion> = HashMap::new();
+    let mut topic_to_regions: HashMap<String, Vec<RegionId>> = HashMap::new();
+    let mut remaining_regions = vec![];
+
     for table_value in table_values {
         for region_number in table_value.regions {
             // Augments region options with wal options if a wal options is provided.
             let mut region_options = table_value.region_info.region_options.clone();
-            prepare_wal_options(
+            let region_id = RegionId::new(table_value.table_id, region_number);
+            match prepare_wal_options(
                 &mut region_options,
-                RegionId::new(table_value.table_id, region_number),
+                region_id,
                 &table_value.region_info.region_wal_options,
-            );
+            )
+            .context(error::ParseWalOptionsSnafu)?
+            {
+                WalOptions::RaftEngine => remaining_regions.push(region_id),
+                WalOptions::Kafka(options) => topic_to_regions
+                    .entry(options.topic)
+                    .or_default()
+                    .push(region_id),
+            }
 
-            regions.push((
-                RegionId::new(table_value.table_id, region_number),
-                table_value.region_info.engine.clone(),
-                table_value.region_info.region_storage_path.clone(),
-                region_options,
-            ));
+            regions.insert(
+                region_id,
+                OpeningRegion {
+                    engine: table_value.region_info.engine.clone(),
+                    store_path: table_value.region_info.region_storage_path.clone(),
+                    options: region_options,
+                },
+            );
         }
     }
+
     info!("going to open {} region(s)", regions.len());
+    let region_server_ref = &region_server;
+
+    for (topic, region_ids) in topic_to_regions {
+        let entry_distributor = Arc::new(KafkaWalEntryDistributor::default());
+        for region_id in region_ids {
+            let mut tasks = vec![];
+            let OpeningRegion {
+                engine,
+                store_path,
+                options,
+            } = regions[&region_id].clone();
+            let region_dir = region_dir(&store_path, region_id);
+            let entry_distributor = entry_distributor.clone();
+            tasks.push(async move {
+                region_server_ref
+                    .handle_request(
+                        region_id,
+                        RegionRequest::Open(RegionOpenRequest {
+                            engine: engine.clone(),
+                            region_dir,
+                            options,
+                            skip_wal_replay: false,
+                            entry_distributor: Some(entry_distributor),
+                        }),
+                    )
+                    .await?;
+                if open_with_writable {
+                    if let Err(e) = region_server_ref.set_writable(region_id, true) {
+                        error!(
+                            e; "failed to set writable for region {region_id}"
+                        );
+                    }
+                }
+                Ok(())
+            });
+
+            let _ = try_join_all(tasks).await?;
+        }
+    }
+
     let semaphore = Arc::new(tokio::sync::Semaphore::new(OPEN_REGION_PARALLELISM));
     let mut tasks = vec![];
-
     let region_server_ref = &region_server;
-    for (region_id, engine, store_path, options) in regions {
+
+    // Opening remaining regions
+    for region_id in remaining_regions {
+        let OpeningRegion {
+            engine,
+            store_path,
+            options,
+        } = regions[&region_id].clone();
+
         let region_dir = region_dir(&store_path, region_id);
         let semaphore_moved = semaphore.clone();
 
@@ -486,6 +559,7 @@ async fn open_all_regions(
                         region_dir,
                         options,
                         skip_wal_replay: false,
+                        entry_distributor: None,
                     }),
                 )
                 .await?;

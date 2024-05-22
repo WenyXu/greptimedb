@@ -23,7 +23,8 @@ use common_wal::options::WalOptions;
 use futures::StreamExt;
 use object_store::manager::ObjectStoreManagerRef;
 use object_store::util::{join_dir, normalize_dir};
-use snafu::{ensure, OptionExt};
+use snafu::{ensure, OptionExt, ResultExt};
+use store_api::logstore::entry_distributor::EntryDistributorRef;
 use store_api::logstore::LogStore;
 use store_api::metadata::{ColumnMetadata, RegionMetadata};
 use store_api::storage::{ColumnId, RegionId};
@@ -32,7 +33,8 @@ use crate::access_layer::AccessLayer;
 use crate::cache::CacheManagerRef;
 use crate::config::MitoConfig;
 use crate::error::{
-    EmptyRegionDirSnafu, ObjectStoreNotFoundSnafu, RegionCorruptedSnafu, Result, StaleLogEntrySnafu,
+    self, EmptyRegionDirSnafu, ObjectStoreNotFoundSnafu, RegionCorruptedSnafu, Result,
+    StaleLogEntrySnafu,
 };
 use crate::manifest::manager::{RegionManifestManager, RegionManifestOptions};
 use crate::manifest::storage::manifest_compress_type;
@@ -47,7 +49,8 @@ use crate::schedule::scheduler::SchedulerRef;
 use crate::sst::file_purger::LocalFilePurger;
 use crate::sst::index::intermediate::IntermediateManager;
 use crate::time_provider::{StdTimeProvider, TimeProviderRef};
-use crate::wal::{EntryId, Wal};
+use crate::wal::reader::LogStoreReader;
+use crate::wal::{entry_decoder, EntryId, Wal};
 
 /// Builder to create a new [MitoRegion] or open an existing one.
 pub(crate) struct RegionOpener {
@@ -129,11 +132,12 @@ impl RegionOpener {
         mut self,
         config: &MitoConfig,
         wal: &Wal<S>,
+        entry_distributor: EntryDistributorRef,
     ) -> Result<MitoRegion> {
         let region_id = self.region_id;
 
         // Tries to open the region.
-        match self.maybe_open(config, wal).await {
+        match self.maybe_open(config, wal, entry_distributor).await {
             Ok(Some(region)) => {
                 let recovered = region.metadata();
                 // Checks the schema of the region.
@@ -226,10 +230,11 @@ impl RegionOpener {
         self,
         config: &MitoConfig,
         wal: &Wal<S>,
+        wal_entry_distributor: EntryDistributorRef,
     ) -> Result<MitoRegion> {
         let region_id = self.region_id;
         let region = self
-            .maybe_open(config, wal)
+            .maybe_open(config, wal, wal_entry_distributor)
             .await?
             .context(EmptyRegionDirSnafu {
                 region_id,
@@ -255,6 +260,7 @@ impl RegionOpener {
         &self,
         config: &MitoConfig,
         wal: &Wal<S>,
+        entry_distributor: EntryDistributorRef,
     ) -> Result<Option<MitoRegion>> {
         let region_options = self.options.as_ref().unwrap().clone();
         let wal_options = region_options.wal_options.clone();
@@ -313,6 +319,7 @@ impl RegionOpener {
             );
             replay_memtable(
                 wal,
+                entry_distributor,
                 &wal_options,
                 region_id,
                 flushed_entry_id,
@@ -430,6 +437,7 @@ pub(crate) fn check_recovered_region(
 /// Replays the mutations from WAL and inserts mutations to memtable of given region.
 pub(crate) async fn replay_memtable<S: LogStore>(
     wal: &Wal<S>,
+    entry_distributor: EntryDistributorRef,
     wal_options: &WalOptions,
     region_id: RegionId,
     flushed_entry_id: EntryId,
@@ -442,9 +450,16 @@ pub(crate) async fn replay_memtable<S: LogStore>(
     let mut last_entry_id = flushed_entry_id;
     let replay_from_entry_id = flushed_entry_id + 1;
 
-    let mut wal_stream = wal.scan(region_id, replay_from_entry_id, wal_options)?;
+    let wal_reader = Arc::new(LogStoreReader::new(
+        wal.store().clone(),
+        Arc::new(entry_decoder),
+    ));
+    let mut wal_stream = entry_distributor
+        .subscribe(wal_reader, region_id, wal_options, replay_from_entry_id)
+        .context(error::ReadWalSnafu { region_id })?;
+
     while let Some(res) = wal_stream.next().await {
-        let (entry_id, entry) = res?;
+        let (entry_id, entry) = res.context(error::ReadWalSnafu { region_id })?;
         if entry_id <= flushed_entry_id {
             warn!("Stale WAL entries read during replay, region id: {}, flushed entry id: {}, entry id read: {}", region_id, flushed_entry_id, entry_id);
             ensure!(

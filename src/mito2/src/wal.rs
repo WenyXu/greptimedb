@@ -14,6 +14,9 @@
 
 //! Write ahead log of the engine.
 
+pub mod distributor;
+pub mod reader;
+
 use std::collections::HashMap;
 use std::mem;
 use std::sync::Arc;
@@ -39,6 +42,9 @@ pub type EntryId = store_api::logstore::entry::Id;
 /// A stream that yields tuple of WAL entry id and corresponding entry.
 pub type WalEntryStream<'a> = BoxStream<'a, Result<(EntryId, WalEntry)>>;
 
+/// A stream that yields tuple of WAL entry id and corresponding entry.
+pub type WalEntryExtStream<'a> = BoxStream<'a, Result<(EntryId, RegionId, WalEntry)>>;
+
 /// Write ahead log.
 ///
 /// All regions in the engine shares the same WAL instance.
@@ -56,6 +62,11 @@ impl<S> Wal<S> {
 }
 
 impl<S: LogStore> Wal<S> {
+    /// Returns the inner store.
+    pub fn store(&self) -> &Arc<S> {
+        &self.store
+    }
+
     /// Returns a writer to write to the WAL.
     pub fn writer(&self) -> WalWriter<S> {
         WalWriter {
@@ -120,6 +131,19 @@ fn decode_entry<E: Entry>(region_id: RegionId, entry: E) -> Result<(EntryId, Wal
     let wal_entry = WalEntry::decode(data).context(DecodeWalSnafu { region_id })?;
 
     Ok((entry_id, wal_entry))
+}
+
+pub(crate) fn entry_decoder(
+    entry: &dyn Entry,
+) -> std::result::Result<(EntryId, RegionId, WalEntry), BoxedError> {
+    let entry_id = entry.id();
+    let region_id = entry.id();
+    let data = entry.data();
+
+    let wal_entry = WalEntry::decode(data)
+        .context(DecodeWalSnafu { region_id })
+        .map_err(BoxedError::new)?;
+    Ok((entry_id, RegionId::from_u64(region_id), wal_entry))
 }
 
 /// WAL batch writer.

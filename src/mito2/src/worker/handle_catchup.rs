@@ -25,6 +25,7 @@ use tokio::time::Instant;
 
 use crate::error::{self, Result};
 use crate::region::opener::{replay_memtable, RegionOpener};
+use crate::wal::distributor::NaiveEntryDistributor;
 use crate::worker::RegionWorkerLoop;
 
 impl<S: LogStore> RegionWorkerLoop<S> {
@@ -44,6 +45,7 @@ impl<S: LogStore> RegionWorkerLoop<S> {
         // It's expensive to execute catch-up requests without `set_writable=true` multiple times.
         let is_mutable_empty = region.version().memtables.mutable.is_empty();
 
+        let wal_entry_distributor = Arc::new(NaiveEntryDistributor);
         // Utilizes the short circuit evaluation.
         let region = if !is_mutable_empty || region.manifest_ctx.has_update().await? {
             info!("Reopening the region: {region_id}, empty mutable: {is_mutable_empty}");
@@ -59,7 +61,7 @@ impl<S: LogStore> RegionWorkerLoop<S> {
                 .cache(Some(self.cache_manager.clone()))
                 .options(region.version().options.clone())
                 .skip_wal_replay(true)
-                .open(&self.config, &self.wal)
+                .open(&self.config, &self.wal, wal_entry_distributor.clone())
                 .await?,
             );
             debug_assert!(!reopened_region.is_writable());
@@ -75,6 +77,7 @@ impl<S: LogStore> RegionWorkerLoop<S> {
         let timer = Instant::now();
         let last_entry_id = replay_memtable(
             &self.wal,
+            wal_entry_distributor.clone(),
             &region.wal_options,
             region_id,
             flushed_entry_id,
@@ -82,6 +85,7 @@ impl<S: LogStore> RegionWorkerLoop<S> {
             self.config.allow_stale_entries,
         )
         .await?;
+
         info!(
             "Elapsed: {:?}, region: {region_id} catchup finished. last entry id: {last_entry_id}, expected: {:?}.",
             timer.elapsed(),

@@ -39,6 +39,7 @@ mod tests {
 
     use super::*;
     pub use crate::logstore::entry::Id;
+    use crate::storage::RegionId;
 
     pub struct SimpleEntry {
         /// Binary data of current entry
@@ -64,10 +65,12 @@ mod tests {
     }
 
     impl Entry for SimpleEntry {
-        type Error = Error;
-
         fn data(&self) -> &[u8] {
             &self.data
+        }
+
+        fn region_id(&self) -> RegionId {
+            RegionId::from_u64(0)
         }
 
         fn id(&self) -> Id {

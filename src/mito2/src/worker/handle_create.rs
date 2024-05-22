@@ -26,6 +26,7 @@ use store_api::storage::RegionId;
 use crate::error::{InvalidMetadataSnafu, Result};
 use crate::metrics::REGION_COUNT;
 use crate::region::opener::{check_recovered_region, RegionOpener};
+use crate::wal::distributor::NaiveEntryDistributor;
 use crate::worker::RegionWorkerLoop;
 
 impl<S: LogStore> RegionWorkerLoop<S> {
@@ -66,7 +67,7 @@ impl<S: LogStore> RegionWorkerLoop<S> {
         .metadata(metadata)
         .parse_options(request.options)?
         .cache(Some(self.cache_manager.clone()))
-        .create_or_open(&self.config, &self.wal)
+        .create_or_open(&self.config, &self.wal, Arc::new(NaiveEntryDistributor))
         .await?;
 
         info!("A new region created, region: {:?}", region.metadata());

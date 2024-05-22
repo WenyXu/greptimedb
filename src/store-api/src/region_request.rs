@@ -29,6 +29,7 @@ use snafu::{ensure, OptionExt};
 use strum::IntoStaticStr;
 
 use crate::logstore::entry;
+use crate::logstore::entry_distributor::EntryDistributorRef;
 use crate::metadata::{
     ColumnMetadata, InvalidRawRegionRequestSnafu, InvalidRegionRequestSnafu, MetadataError,
     RegionMetadata, Result,
@@ -159,6 +160,7 @@ fn make_region_open(open: OpenRequest) -> Result<Vec<(RegionId, RegionRequest)>>
             region_dir,
             options: open.options,
             skip_wal_replay: false,
+            entry_distributor: None,
         }),
     )])
 }
@@ -309,6 +311,8 @@ pub struct RegionOpenRequest {
     pub options: HashMap<String, String>,
     /// To skip replaying the WAL.
     pub skip_wal_replay: bool,
+    /// The entry distributor
+    pub entry_distributor: Option<EntryDistributorRef>,
 }
 
 /// Close region request.

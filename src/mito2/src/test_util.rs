@@ -812,6 +812,7 @@ pub async fn reopen_region(
                 region_dir,
                 options,
                 skip_wal_replay: false,
+                entry_distributor: None,
             }),
         )
         .await

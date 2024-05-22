@@ -121,6 +121,7 @@ async fn test_region_replay() {
                 region_dir,
                 options: HashMap::default(),
                 skip_wal_replay: false,
+                entry_distributor: None,
             }),
         )
         .await

@@ -164,6 +164,7 @@ mod tests {
             region_dir,
             options: HashMap::default(),
             skip_wal_replay: false,
+            entry_distributor: None,
         };
 
         let region = FileRegion::open(region_id, request, &object_store)
@@ -213,6 +214,7 @@ mod tests {
             region_dir,
             options: HashMap::default(),
             skip_wal_replay: false,
+            entry_distributor: None,
         };
         let err = FileRegion::open(region_id, request, &object_store)
             .await

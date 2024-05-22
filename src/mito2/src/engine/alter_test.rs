@@ -122,6 +122,7 @@ async fn test_alter_region() {
                 region_dir,
                 options: HashMap::default(),
                 skip_wal_replay: false,
+                entry_distributor: None,
             }),
         )
         .await
@@ -205,6 +206,7 @@ async fn test_put_after_alter() {
                 region_dir,
                 options: HashMap::default(),
                 skip_wal_replay: false,
+                entry_distributor: None,
             }),
         )
         .await

@@ -44,6 +44,7 @@ async fn test_engine_open_empty() {
                 region_dir: "empty".to_string(),
                 options: HashMap::default(),
                 skip_wal_replay: false,
+                entry_distributor: None,
             }),
         )
         .await
@@ -76,6 +77,7 @@ async fn test_engine_open_existing() {
                 region_dir,
                 options: HashMap::default(),
                 skip_wal_replay: false,
+                entry_distributor: None,
             }),
         )
         .await
@@ -165,6 +167,7 @@ async fn test_engine_region_open_with_options() {
                 region_dir,
                 options: HashMap::from([("ttl".to_string(), "4d".to_string())]),
                 skip_wal_replay: false,
+                entry_distributor: None,
             }),
         )
         .await
@@ -210,6 +213,7 @@ async fn test_engine_region_open_with_custom_store() {
                 region_dir,
                 options: HashMap::from([("storage".to_string(), "Gcs".to_string())]),
                 skip_wal_replay: false,
+                entry_distributor: None,
             }),
         )
         .await
@@ -270,6 +274,7 @@ async fn test_open_region_skip_wal_replay() {
                 region_dir: region_dir.to_string(),
                 options: Default::default(),
                 skip_wal_replay: true,
+                entry_distributor: None,
             }),
         )
         .await
@@ -299,6 +304,7 @@ async fn test_open_region_skip_wal_replay() {
                 region_dir,
                 options: Default::default(),
                 skip_wal_replay: false,
+                entry_distributor: None,
             }),
         )
         .await

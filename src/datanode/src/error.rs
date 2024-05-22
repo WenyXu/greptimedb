@@ -57,6 +57,13 @@ pub enum Error {
         source: common_meta::error::Error,
     },
 
+    #[snafu(display("Failed to parse wal options"))]
+    ParseWalOptions {
+        source: common_meta::error::Error,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
     #[snafu(display("Failed to execute logical plan"))]
     ExecuteLogicalPlan {
         #[snafu(implicit)]
@@ -417,7 +424,8 @@ impl ErrorExt for Error {
             | IncorrectInternalState { .. }
             | ShutdownInstance { .. }
             | RegionEngineNotFound { .. }
-            | UnsupportedOutput { .. } => StatusCode::Internal,
+            | UnsupportedOutput { .. }
+            | ParseWalOptions { .. } => StatusCode::Internal,
 
             RegionNotFound { .. } => StatusCode::RegionNotFound,
             RegionNotReady { .. } => StatusCode::RegionNotReady,
