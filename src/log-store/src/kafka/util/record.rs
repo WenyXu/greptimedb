@@ -285,7 +285,7 @@ pub fn maybe_emit_entry(
         }
         RecordType::Last => {
             // There must have a sequence prefix before a Last record is read.
-            let mut records =
+            let mut records: Vec<Record> =
                 entry_records
                     .remove(&record.meta.entry_id)
                     .context(IllegalSequenceSnafu {
