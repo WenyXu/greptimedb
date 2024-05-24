@@ -26,8 +26,8 @@ use store_api::storage::RegionId;
 use crate::error::{InvalidMetadataSnafu, Result};
 use crate::metrics::REGION_COUNT;
 use crate::region::opener::{check_recovered_region, RegionOpener};
-use crate::wal::raw_entry_reader::LogStoreRawEntryReader;
 use crate::wal::entry_reader::LogStoreEntryReader;
+use crate::wal::raw_entry_reader::LogStoreRawEntryReader;
 use crate::worker::RegionWorkerLoop;
 
 impl<S: LogStore> RegionWorkerLoop<S> {

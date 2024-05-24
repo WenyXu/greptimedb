@@ -187,11 +187,7 @@ pub fn build_wal_entry_distributor(
 
         senders.insert(region_id, entry_sender);
         arg_receivers.push((region_id, arg_receiver));
-        readers.push(WalEntryReceiver::new(
-            region_id,
-            entry_receiver,
-            arg_sender,
-        ));
+        readers.push(WalEntryReceiver::new(region_id, entry_receiver, arg_sender));
     }
 
     (
