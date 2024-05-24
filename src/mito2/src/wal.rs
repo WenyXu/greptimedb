@@ -14,6 +14,10 @@
 
 //! Write ahead log of the engine.
 
+pub(crate) mod entry_distributor;
+pub(crate) mod entry_reader;
+pub(crate) mod raw_entry_reader;
+
 use std::collections::HashMap;
 use std::mem;
 use std::sync::Arc;
@@ -52,6 +56,11 @@ impl<S> Wal<S> {
     /// Creates a new [Wal] from the log store.
     pub fn new(store: Arc<S>) -> Self {
         Self { store }
+    }
+
+    /// Returns the inner store.
+    pub fn store(&self) -> &Arc<S> {
+        &self.store
     }
 }
 

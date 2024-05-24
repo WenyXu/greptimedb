@@ -26,14 +26,14 @@ use common_query::error::ExecuteRepeatedlySnafu;
 use common_recordbatch::SendableRecordBatchStream;
 use datafusion_physical_plan::{DisplayAs, DisplayFormatType};
 use datatypes::schema::SchemaRef;
-use futures::future::join_all;
+use futures::future::try_join_all;
 use serde::{Deserialize, Serialize};
 use snafu::OptionExt;
 use tokio::sync::Semaphore;
 
 use crate::logstore::entry;
 use crate::metadata::RegionMetadataRef;
-use crate::region_request::{BatchRegionRequest, RegionRequest};
+use crate::region_request::{RegionOpenRequest, RegionRequest};
 use crate::storage::{RegionId, ScanRequest};
 
 /// The result of setting readonly for the region.
@@ -178,15 +178,15 @@ pub trait RegionScanner: Debug + DisplayAs + Send + Sync {
 pub type RegionScannerRef = Arc<dyn RegionScanner>;
 
 /// The default batch request handler.
-pub async fn handle_batch_request<E: RegionEngine + ?Sized>(
+pub async fn handle_batch_open_requests<E: RegionEngine + ?Sized>(
     engine: &E,
     parallelism: usize,
-    batch_request: BatchRegionRequest,
-) -> Vec<Result<(RegionId, RegionResponse), BoxedError>> {
+    requests: Vec<(RegionId, RegionOpenRequest)>,
+) -> Result<(), BoxedError> {
     let semaphore = Arc::new(Semaphore::new(parallelism));
     let mut tasks = Vec::with_capacity(parallelism);
 
-    for (region_id, request) in batch_request.into_region_requests() {
+    for (region_id, request) in requests {
         let self_ref = engine;
         let semaphore_moved = semaphore.clone();
 
@@ -194,13 +194,15 @@ pub async fn handle_batch_request<E: RegionEngine + ?Sized>(
             // Safety: semaphore must exist
             let _permit = semaphore_moved.acquire().await.unwrap();
             self_ref
-                .handle_request(region_id, request)
+                .handle_request(region_id, RegionRequest::Open(request))
                 .await
                 .map(|response| (region_id, response))
         });
     }
 
-    join_all(tasks).await
+    let _ = try_join_all(tasks).await?;
+
+    Ok(())
 }
 
 #[async_trait]
@@ -208,12 +210,12 @@ pub trait RegionEngine: Send + Sync {
     /// Name of this engine
     fn name(&self) -> &str;
 
-    async fn handle_batch_request(
+    async fn handle_batch_open_requests(
         &self,
         parallelism: usize,
-        batch_request: BatchRegionRequest,
-    ) -> Vec<Result<(RegionId, RegionResponse), BoxedError>> {
-        handle_batch_request(self, parallelism, batch_request).await
+        requests: Vec<(RegionId, RegionOpenRequest)>,
+    ) -> Result<(), BoxedError> {
+        handle_batch_open_requests(self, parallelism, requests).await
     }
 
     /// Handles non-query request to the region. Returns the count of affected rows.

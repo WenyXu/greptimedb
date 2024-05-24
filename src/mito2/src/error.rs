@@ -250,6 +250,21 @@ pub enum Error {
         source: BoxedError,
     },
 
+    #[snafu(display("Failed to read WAL, topic: {}", topic))]
+    ReadKafkaWal {
+        topic: String,
+        #[snafu(implicit)]
+        location: Location,
+        source: BoxedError,
+    },
+
+    #[snafu(display("Invalid wal read request, {}", reason))]
+    InvalidWalReadRequest {
+        reason: String,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
     #[snafu(display("Failed to decode WAL entry, region_id: {}", region_id))]
     DecodeWal {
         region_id: RegionId,
@@ -742,6 +757,7 @@ impl ErrorExt for Error {
             | ReadParquet { .. }
             | WriteWal { .. }
             | ReadWal { .. }
+            | ReadKafkaWal { .. }
             | DeleteWal { .. } => StatusCode::StorageUnavailable,
             CompressObject { .. }
             | DecompressObject { .. }
@@ -773,7 +789,8 @@ impl ErrorExt for Error {
             | WorkerStopped { .. }
             | Recv { .. }
             | EncodeWal { .. }
-            | DecodeWal { .. } => StatusCode::Internal,
+            | DecodeWal { .. }
+            | InvalidWalReadRequest { .. } => StatusCode::Internal,
             WriteBuffer { source, .. } => source.status_code(),
             WriteGroup { source, .. } => source.status_code(),
             FieldTypeMismatch { source, .. } => source.status_code(),

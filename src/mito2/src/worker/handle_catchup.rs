@@ -25,6 +25,7 @@ use tokio::time::Instant;
 
 use crate::error::{self, Result};
 use crate::region::opener::{replay_memtable, RegionOpener};
+use crate::wal::raw_entry_reader::LogStoreRawEntryReader;
 use crate::worker::RegionWorkerLoop;
 
 impl<S: LogStore> RegionWorkerLoop<S> {

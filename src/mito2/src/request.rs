@@ -497,6 +497,20 @@ pub(crate) enum WorkerRequest {
 }
 
 impl WorkerRequest {
+    pub(crate) fn new_open_region_request(
+        (region_id, request, subscriber): (RegionId, RegionOpenRequest, Option<WalEntrySubscriber>),
+    ) -> (WorkerRequest, Receiver<Result<AffectedRows>>) {
+        let (sender, receiver) = oneshot::channel();
+
+        let worker_request = WorkerRequest::Ddl(SenderDdlRequest {
+            region_id,
+            sender: sender.into(),
+            request: DdlRequest::Open((request, subscriber)),
+        });
+
+        (worker_request, receiver)
+    }
+
     /// Converts request from a [RegionRequest].
     pub(crate) fn try_from_region_request(
         region_id: RegionId,
@@ -531,7 +545,7 @@ impl WorkerRequest {
             RegionRequest::Open(v) => WorkerRequest::Ddl(SenderDdlRequest {
                 region_id,
                 sender: sender.into(),
-                request: DdlRequest::Open(v),
+                request: DdlRequest::Open((v, None)),
             }),
             RegionRequest::Close(v) => WorkerRequest::Ddl(SenderDdlRequest {
                 region_id,
@@ -585,7 +599,7 @@ impl WorkerRequest {
 pub(crate) enum DdlRequest {
     Create(RegionCreateRequest),
     Drop(RegionDropRequest),
-    Open(RegionOpenRequest),
+    Open((RegionOpenRequest, Option<WalEntrySubscriber>)),
     Close(RegionCloseRequest),
     Alter(RegionAlterRequest),
     Flush(RegionFlushRequest),

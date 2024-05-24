@@ -37,21 +37,6 @@ use crate::path_utils::region_dir;
 use crate::storage::{ColumnId, RegionId, ScanRequest};
 
 #[derive(Debug, IntoStaticStr)]
-pub enum BatchRegionRequest {
-    Open(Vec<(RegionId, RegionOpenRequest)>),
-}
-
-impl BatchRegionRequest {
-    pub fn into_region_requests(self) -> impl IntoIterator<Item = (RegionId, RegionRequest)> {
-        match self {
-            BatchRegionRequest::Open(requests) => requests
-                .into_iter()
-                .map(|(region_id, request)| (region_id, RegionRequest::Open(request))),
-        }
-    }
-}
-
-#[derive(Debug, IntoStaticStr)]
 pub enum RegionRequest {
     Put(RegionPutRequest),
     Delete(RegionDeleteRequest),

@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use common_wal::options::WalOptions;
-use store_api::logstore::entry::{Entry, Id as EntryId};
+use store_api::logstore::entry::{Entry, Id as EntryId, RawEntry};
 use store_api::logstore::namespace::{Id as NamespaceId, Namespace};
 use store_api::logstore::{AppendBatchResponse, AppendResponse, LogStore};
+use store_api::storage::RegionId;
 
 use crate::error::{Error, Result};
 
@@ -36,14 +37,24 @@ impl Namespace for NamespaceImpl {
 }
 
 impl Entry for EntryImpl {
-    type Error = Error;
-
     fn data(&self) -> &[u8] {
         &[]
     }
 
     fn id(&self) -> EntryId {
         0
+    }
+
+    fn into_raw_entry(self) -> RawEntry {
+        RawEntry {
+            region_id: self.region_id(),
+            entry_id: self.id(),
+            data: vec![],
+        }
+    }
+
+    fn region_id(&self) -> RegionId {
+        RegionId::from_u64(0)
     }
 
     fn estimated_size(&self) -> usize {
