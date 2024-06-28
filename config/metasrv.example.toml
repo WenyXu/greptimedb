@@ -57,6 +57,12 @@ min_std_deviation = "100ms"
 acceptable_heartbeat_pause = "3000ms"
 first_heartbeat_estimate = "1000ms"
 
+[time_constants]
+datanode_heartbeat_interval = "3s"
+frontend_heartbeat_interval = "18s"
+meta_leader_lease_timeout = "3s"
+mailbox_message_round_trip_timeout = "1s"
+
 ## Datanode options.
 [datanode]
 ## Datanode client options.
