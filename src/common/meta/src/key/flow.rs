@@ -56,6 +56,14 @@ impl<T> Deref for FlowScoped<T> {
     }
 }
 
+impl<T: Clone> Clone for FlowScoped<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 impl<T> FlowScoped<T> {
     const PREFIX: &'static str = "__flow/";
 

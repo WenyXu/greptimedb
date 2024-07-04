@@ -40,7 +40,7 @@ lazy_static! {
 /// The key stores the route info of the flow.
 ///
 /// The layout: `__flow/route/{flow_id}/{partition_id}`.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FlowRouteKey(FlowScoped<FlowRouteKeyInner>);
 
 impl FlowRouteKey {
@@ -156,6 +156,8 @@ pub fn flow_route_decoder(kv: KeyValue) -> Result<(FlowRouteKey, FlowRouteValue)
     let value = FlowRouteValue::try_from_raw_value(&kv.value)?;
     Ok((key, value))
 }
+
+pub type FlowRouteManagerRef = Arc<FlowRouteManager>;
 
 /// The manager of [FlowRouteKey].
 pub struct FlowRouteManager {

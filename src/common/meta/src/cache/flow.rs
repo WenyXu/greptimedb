@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod flow_routes;
 mod table_flownode;
+pub use flow_routes::{new_flow_routes_cache, FlowRoutesCache, FlowRoutesCacheRef};
 pub use table_flownode::{
     new_table_flownode_set_cache, TableFlownodeSetCache, TableFlownodeSetCacheRef,
 };
