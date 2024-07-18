@@ -27,7 +27,9 @@ use store_api::logstore::entry::{
     Entry, Id as EntryId, MultiplePartEntry, MultiplePartHeader, NaiveEntry,
 };
 use store_api::logstore::provider::{KafkaProvider, Provider};
-use store_api::logstore::{AppendBatchResponse, LogStore, SendableEntryStream};
+use store_api::logstore::{
+    AppendBatchResponse, AppendBatchResponseExt, LogStore, SendableEntryStream,
+};
 use store_api::storage::RegionId;
 
 use crate::error::{self, ConsumeRecordSnafu, Error, GetOffsetSnafu, InvalidProviderSnafu, Result};
@@ -181,16 +183,25 @@ impl LogStore for KafkaLogStore {
             region_grouped_result_receivers.push((region_id, producer.produce(records).await?))
         }
 
-        let region_grouped_max_offset =
-            try_join_all(region_grouped_result_receivers.into_iter().map(
-                |(region_id, receiver)| async move {
-                    receiver.wait().await.map(|offset| (region_id, offset))
-                },
-            ))
-            .await?;
+        let region_grouped_offset = try_join_all(region_grouped_result_receivers.into_iter().map(
+            |(region_id, receiver)| async move {
+                receiver.wait().await.map(|offset| (region_id, offset))
+            },
+        ))
+        .await?;
+
+        let region_grouped_max_offset = region_grouped_offset
+            .iter()
+            .map(|(region_id, offsets)| {
+                Ok((*region_id, *offsets.last().context(error::NoMaxValueSnafu)?))
+            })
+            .collect::<Result<HashMap<_, _>>>()?;
 
         Ok(AppendBatchResponse {
-            last_entry_ids: region_grouped_max_offset.into_iter().collect(),
+            last_entry_ids: region_grouped_max_offset,
+            extension: Some(AppendBatchResponseExt::Kafka(
+                region_grouped_offset.into_iter().collect(),
+            )),
         })
     }
 

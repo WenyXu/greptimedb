@@ -81,9 +81,16 @@ pub struct AppendResponse {
     pub last_entry_id: EntryId,
 }
 
+#[derive(Debug)]
+pub enum AppendBatchResponseExt {
+    Kafka(HashMap<RegionId, Vec<EntryId>>),
+}
+
 /// The response of an `append_batch` operation.
 #[derive(Debug, Default)]
 pub struct AppendBatchResponse {
     /// Key: region id (as u64). Value: the id of the last successfully written entry of the region.
     pub last_entry_ids: HashMap<RegionId, EntryId>,
+    /// The extension of [`AppendBatchResponse`].
+    pub extension: Option<AppendBatchResponseExt>,
 }

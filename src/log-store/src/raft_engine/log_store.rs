@@ -244,7 +244,10 @@ impl LogStore for RaftEngineLogStore {
             .write(&mut batch, sync)
             .context(RaftEngineSnafu)?;
 
-        Ok(AppendBatchResponse { last_entry_ids })
+        Ok(AppendBatchResponse {
+            last_entry_ids,
+            extension: None,
+        })
     }
 
     /// Create a stream of entries from logstore in the given namespace. The end of stream is

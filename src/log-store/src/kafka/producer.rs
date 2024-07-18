@@ -20,11 +20,11 @@ use futures::future::try_join_all;
 use rskafka::client::partition::Compression;
 use rskafka::client::producer::ProducerClient;
 use rskafka::record::Record;
-use snafu::{OptionExt, ResultExt};
+use snafu::ResultExt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 
-use crate::error::{self, NoMaxValueSnafu, Result};
+use crate::error::{self, Result};
 
 pub struct ProduceRequest {
     batch: Vec<Record>,
@@ -41,7 +41,7 @@ impl ProduceResultReceiver {
         self.receivers.push(receiver)
     }
 
-    async fn wait(self) -> Result<u64> {
+    async fn wait(self) -> Result<Vec<u64>> {
         Ok(try_join_all(self.receivers)
             .await
             .into_iter()
@@ -49,8 +49,8 @@ impl ProduceResultReceiver {
             .collect::<Result<Vec<_>>>()?
             .into_iter()
             .flatten()
-            .max()
-            .context(NoMaxValueSnafu)? as u64)
+            .map(|offset| offset as u64)
+            .collect::<Vec<u64>>())
     }
 }
 
@@ -201,8 +201,8 @@ pub(crate) struct ProduceResultHandle {
 
 impl ProduceResultHandle {
     /// Waits for the data has been committed to Kafka.
-    /// Returns the **max** committed offsets.
-    pub(crate) async fn wait(self) -> Result<u64> {
+    /// Returns the **all** committed offsets.
+    pub(crate) async fn wait(self) -> Result<Vec<u64>> {
         self.receiver
             .await
             .context(error::WaitProduceResultReceiverSnafu)?
@@ -355,7 +355,7 @@ mod tests {
             .produce(vec![record.clone(), record.clone(), record.clone()])
             .await
             .unwrap();
-        assert_eq!(handle.wait().await.unwrap(), 2);
+        assert_eq!(*handle.wait().await.unwrap().last().unwrap(), 2);
         assert_eq!(client.batch_sizes.lock().unwrap().as_slice(), &[2, 1]);
 
         // Produces 2 records
@@ -363,12 +363,12 @@ mod tests {
             .produce(vec![record.clone(), record.clone()])
             .await
             .unwrap();
-        assert_eq!(handle.wait().await.unwrap(), 4);
+        assert_eq!(*handle.wait().await.unwrap().last().unwrap(), 4);
         assert_eq!(client.batch_sizes.lock().unwrap().as_slice(), &[2, 1, 2]);
 
         // Produces 1 records
         let handle = producer.produce(vec![record.clone()]).await.unwrap();
-        assert_eq!(handle.wait().await.unwrap(), 5);
+        assert_eq!(*handle.wait().await.unwrap().last().unwrap(), 5);
         assert_eq!(client.batch_sizes.lock().unwrap().as_slice(), &[2, 1, 2, 1]);
     }
 
