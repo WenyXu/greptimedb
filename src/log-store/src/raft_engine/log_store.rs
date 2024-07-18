@@ -244,10 +244,7 @@ impl LogStore for RaftEngineLogStore {
             .write(&mut batch, sync)
             .context(RaftEngineSnafu)?;
 
-        Ok(AppendBatchResponse {
-            last_entry_ids,
-            extension: None,
-        })
+        Ok(AppendBatchResponse { last_entry_ids })
     }
 
     /// Create a stream of entries from logstore in the given namespace. The end of stream is
@@ -422,7 +419,12 @@ impl LogStore for RaftEngineLogStore {
         }))
     }
 
-    async fn obsolete(&self, provider: &Provider, entry_id: EntryId) -> Result<()> {
+    async fn obsolete(
+        &self,
+        provider: &Provider,
+        _region_id: RegionId,
+        entry_id: EntryId,
+    ) -> Result<()> {
         let ns = provider
             .as_raft_engine_provider()
             .with_context(|| InvalidProviderSnafu {
@@ -650,7 +652,10 @@ mod tests {
         }
 
         let before_purge = wal_dir_usage(dir.path().to_str().unwrap()).await;
-        logstore.obsolete(&namespace, 4000).await.unwrap();
+        logstore
+            .obsolete(&namespace, namespace_id.into(), 4000)
+            .await
+            .unwrap();
 
         tokio::time::sleep(Duration::from_secs(6)).await;
         let after_purge = wal_dir_usage(dir.path().to_str().unwrap()).await;
@@ -674,7 +679,10 @@ mod tests {
             let _ = logstore.append(entry).await.unwrap();
         }
 
-        logstore.obsolete(&namespace, 100).await.unwrap();
+        logstore
+            .obsolete(&namespace, namespace_id.into(), 100)
+            .await
+            .unwrap();
         assert_eq!(101, logstore.engine.first_index(namespace_id).unwrap());
 
         let res = logstore.read(&namespace, 100).await.unwrap();

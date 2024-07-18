@@ -62,7 +62,12 @@ pub trait LogStore: Send + Sync + 'static + std::fmt::Debug {
     /// Marks all entries with ids `<=entry_id` of the given `namespace` as obsolete,
     /// so that the log store can safely delete those entries. This method does not guarantee
     /// that the obsolete entries are deleted immediately.
-    async fn obsolete(&self, provider: &Provider, entry_id: EntryId) -> Result<(), Self::Error>;
+    async fn obsolete(
+        &self,
+        provider: &Provider,
+        region_id: RegionId,
+        entry_id: EntryId,
+    ) -> Result<(), Self::Error>;
 
     /// Makes an entry instance of the associated Entry type
     fn entry(
@@ -81,16 +86,9 @@ pub struct AppendResponse {
     pub last_entry_id: EntryId,
 }
 
-#[derive(Debug)]
-pub enum AppendBatchResponseExt {
-    Kafka(HashMap<RegionId, Vec<EntryId>>),
-}
-
 /// The response of an `append_batch` operation.
 #[derive(Debug, Default)]
 pub struct AppendBatchResponse {
     /// Key: region id (as u64). Value: the id of the last successfully written entry of the region.
     pub last_entry_ids: HashMap<RegionId, EntryId>,
-    /// The extension of [`AppendBatchResponse`].
-    pub extension: Option<AppendBatchResponseExt>,
 }

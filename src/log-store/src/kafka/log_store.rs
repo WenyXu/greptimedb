@@ -27,11 +27,10 @@ use store_api::logstore::entry::{
     Entry, Id as EntryId, MultiplePartEntry, MultiplePartHeader, NaiveEntry,
 };
 use store_api::logstore::provider::{KafkaProvider, Provider};
-use store_api::logstore::{
-    AppendBatchResponse, AppendBatchResponseExt, LogStore, SendableEntryStream,
-};
+use store_api::logstore::{AppendBatchResponse, LogStore, SendableEntryStream};
 use store_api::storage::RegionId;
 
+use super::client_manager::Client;
 use crate::error::{self, ConsumeRecordSnafu, Error, GetOffsetSnafu, InvalidProviderSnafu, Result};
 use crate::kafka::client_manager::{ClientManager, ClientManagerRef};
 use crate::kafka::producer::OrderedBatchProducerRef;
@@ -151,6 +150,8 @@ impl LogStore for KafkaLogStore {
             .collect::<HashSet<_>>();
         let mut region_grouped_records: HashMap<RegionId, (OrderedBatchProducerRef, Vec<_>)> =
             HashMap::with_capacity(region_ids.len());
+        let mut region_clients: HashMap<RegionId, Client> =
+            HashMap::with_capacity(region_ids.len());
         for entry in entries {
             let provider = entry.provider().as_kafka_provider().with_context(|| {
                 error::InvalidProviderSnafu {
@@ -164,13 +165,9 @@ impl LogStore for KafkaLogStore {
                     slot.get_mut().1.extend(convert_to_kafka_records(entry)?);
                 }
                 std::collections::hash_map::Entry::Vacant(slot) => {
-                    let producer = self
-                        .client_manager
-                        .get_or_insert(provider)
-                        .await?
-                        .producer()
-                        .clone();
-
+                    let client = self.client_manager.get_or_insert(provider).await?;
+                    let producer = client.producer().clone();
+                    region_clients.insert(region_id, client);
                     slot.insert((producer, convert_to_kafka_records(entry)?));
                 }
             }
@@ -197,11 +194,13 @@ impl LogStore for KafkaLogStore {
             })
             .collect::<Result<HashMap<_, _>>>()?;
 
+        for (region_id, offsets) in region_grouped_offset {
+            let client = region_clients.get(&region_id).unwrap();
+            client.append_offsets(region_id, offsets).await;
+        }
+
         Ok(AppendBatchResponse {
             last_entry_ids: region_grouped_max_offset,
-            extension: Some(AppendBatchResponseExt::Kafka(
-                region_grouped_offset.into_iter().collect(),
-            )),
         })
     }
 
@@ -341,7 +340,22 @@ impl LogStore for KafkaLogStore {
     /// Marks all entries with ids `<=entry_id` of the given `namespace` as obsolete,
     /// so that the log store can safely delete those entries. This method does not guarantee
     /// that the obsolete entries are deleted immediately.
-    async fn obsolete(&self, _provider: &Provider, _entry_id: EntryId) -> Result<()> {
+    async fn obsolete(
+        &self,
+        provider: &Provider,
+        region_id: RegionId,
+        entry_id: EntryId,
+    ) -> Result<()> {
+        let provider = provider
+            .as_kafka_provider()
+            .with_context(|| InvalidProviderSnafu {
+                expected: KafkaProvider::type_name(),
+                actual: provider.type_name(),
+            })?;
+
+        let client = self.client_manager.get_or_insert(provider).await?;
+        client.obsolete(region_id, entry_id + 1).await;
+
         Ok(())
     }
 

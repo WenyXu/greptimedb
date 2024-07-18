@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use common_wal::config::kafka::DatanodeKafkaConfig;
@@ -21,6 +21,7 @@ use rskafka::client::ClientBuilder;
 use rskafka::BackoffConfig;
 use snafu::ResultExt;
 use store_api::logstore::provider::KafkaProvider;
+use store_api::storage::RegionId;
 use tokio::sync::{Mutex, RwLock};
 
 use super::producer::OrderedBatchProducer;
@@ -44,6 +45,7 @@ pub(crate) type ClientManagerRef = Arc<ClientManager>;
 pub(crate) struct Client {
     client: Arc<PartitionClient>,
     producer: OrderedBatchProducerRef,
+    index: Arc<Mutex<HashMap<RegionId, BTreeSet<u64>>>>,
 }
 
 impl Client {
@@ -53,6 +55,21 @@ impl Client {
 
     pub(crate) fn producer(&self) -> &OrderedBatchProducerRef {
         &self.producer
+    }
+
+    pub(crate) async fn append_offsets(&self, region_id: RegionId, offsets: Vec<u64>) {
+        self.index
+            .lock()
+            .await
+            .entry(region_id)
+            .or_default()
+            .extend(offsets.iter());
+    }
+
+    pub(crate) async fn obsolete(&self, region_id: RegionId, offset: u64) {
+        let mut index = self.index.lock().await;
+        let offsets = index.entry(region_id).or_default();
+        *offsets = offsets.split_off(&offset);
     }
 }
 
@@ -155,7 +172,11 @@ impl ClientManager {
             self.flush_batch_size,
         ));
 
-        Ok(Client { client, producer })
+        Ok(Client {
+            client,
+            producer,
+            index: Arc::new(Default::default()),
+        })
     }
 }
 
