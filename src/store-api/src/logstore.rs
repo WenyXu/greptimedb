@@ -17,7 +17,7 @@
 pub mod entry;
 pub mod provider;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::pin::Pin;
 
 use common_error::ext::ErrorExt;
@@ -49,6 +49,24 @@ pub trait LogStore: Send + Sync + 'static + std::fmt::Debug {
         provider: &Provider,
         id: EntryId,
     ) -> Result<SendableEntryStream<'static, Entry, Self::Error>, Self::Error>;
+
+    async fn read_with_index(
+        &self,
+        _provider: &Provider,
+        _index: BTreeSet<u64>,
+        _id: EntryId,
+    ) -> Result<SendableEntryStream<'static, Entry, Self::Error>, Self::Error> {
+        unimplemented!();
+    }
+
+    async fn index(
+        &self,
+        _node_id: u64,
+        _provider: &Provider,
+        _region_id: RegionId,
+    ) -> Result<BTreeSet<u64>, Self::Error> {
+        unimplemented!();
+    }
 
     /// Creates a new `Namespace` from the given ref.
     async fn create_namespace(&self, ns: &Provider) -> Result<(), Self::Error>;

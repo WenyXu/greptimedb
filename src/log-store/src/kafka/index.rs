@@ -92,7 +92,16 @@ pub(crate) struct WalIndex {
     map: HashMap<String, TopicIndex>,
 }
 
-fn index_path(node: u64) -> String {
+impl WalIndex {
+    pub fn find(&self, topic: &str, region_id: RegionId) -> Option<BTreeSet<u64>> {
+        self.map
+            .get(topic)
+            .and_then(|index| index.index.get(&region_id))
+            .cloned()
+    }
+}
+
+pub(crate) fn index_path(node: u64) -> String {
     format!("/datanode/{node}/wal.index")
 }
 

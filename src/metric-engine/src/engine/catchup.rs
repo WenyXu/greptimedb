@@ -41,6 +41,7 @@ impl MetricEngineInner {
                 RegionRequest::Catchup(RegionCatchupRequest {
                     set_writable: req.set_writable,
                     entry_id: None,
+                    from_datanode_id: None,
                 }),
             )
             .await
@@ -52,6 +53,7 @@ impl MetricEngineInner {
                 RegionRequest::Catchup(RegionCatchupRequest {
                     set_writable: req.set_writable,
                     entry_id: req.entry_id,
+                    from_datanode_id: None,
                 }),
             )
             .await

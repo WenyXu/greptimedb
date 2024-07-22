@@ -45,24 +45,6 @@ lazy_static! {
         &["raft-engine", "read"],
     );
 
-    /// Counter of bytes of the records read by the kafka logstore.
-    pub static ref METRIC_KAFKA_READ_RECORD_BYTES_TOTAL: IntCounter = register_int_counter!(
-        "greptime_kafka_read_record_bytes_total",
-        "kafka read record bytes total"
-    ).unwrap();
-
-    /// Counter of the numbers of the records produced by the kafka logstore.
-    pub static ref METRIC_KAFKA_PRODUCE_RECORD_COUNTS: IntCounter = register_int_counter!(
-        "greptime_kafka_produce_record_counts",
-        "kafka produce record counts",
-    ).unwrap();
-
-    /// Counter of bytes of the records produced by the kafka logstore.
-    pub static ref METRIC_KAFKA_PRODUCE_RECORD_BYTES_TOTAL: IntCounter = register_int_counter!(
-        "greptime_kafka_produce_record_bytes_total",
-        "kafka produce record bytes total"
-    ).unwrap();
-
     /// Counters of calls of each operation on a logstore.
     pub static ref METRIC_LOGSTORE_OP_CALLS_TOTAL: IntCounterVec = register_int_counter_vec!(
         "greptime_logstore_op_calls_total",

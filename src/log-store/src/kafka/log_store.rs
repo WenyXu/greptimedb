@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use common_telemetry::{debug, warn};
+use common_telemetry::{debug, info, warn};
 use common_wal::config::kafka::DatanodeKafkaConfig;
 use futures::future::try_join_all;
 use futures_util::StreamExt;
@@ -31,9 +31,10 @@ use store_api::logstore::{AppendBatchResponse, LogStore, SendableEntryStream};
 use store_api::storage::RegionId;
 
 use super::client_manager::Client;
-use super::index::{IndexSupervisor, NaiveIndexCreator};
+use super::index::{index_path, IndexSupervisor, NaiveIndexCreator, WalIndex};
 use crate::error::{self, ConsumeRecordSnafu, Error, GetOffsetSnafu, InvalidProviderSnafu, Result};
 use crate::kafka::client_manager::{ClientManager, ClientManagerRef};
+use crate::kafka::consumer::Consumer;
 use crate::kafka::producer::OrderedBatchProducerRef;
 use crate::kafka::util::record::{
     convert_to_kafka_records, maybe_emit_entry, remaining_entries, Record, ESTIMATED_META_SIZE,
@@ -50,7 +51,7 @@ pub struct KafkaLogStore {
     /// The consumer wait timeout.
     consumer_wait_timeout: Duration,
     #[allow(dead_code)]
-    index_supervisor: Option<IndexSupervisor>,
+    index_supervisor: Option<(IndexSupervisor, object_store::ObjectStore)>,
 }
 
 pub struct SharedDir {
@@ -70,13 +71,13 @@ impl KafkaLogStore {
             let index_supervisor = IndexSupervisor::new(
                 Box::new(NaiveIndexCreator {
                     client_manager: client_manager.clone(),
-                    operator,
+                    operator: operator.clone(),
                     node,
                 }),
                 Duration::from_secs(30),
             );
 
-            Some(index_supervisor)
+            Some((index_supervisor, operator))
         } else {
             None
         };
@@ -231,6 +232,147 @@ impl LogStore for KafkaLogStore {
         })
     }
 
+    async fn read_with_index(
+        &self,
+        provider: &Provider,
+        index: BTreeSet<u64>,
+        entry_id: EntryId,
+    ) -> Result<SendableEntryStream<'static, Entry, Self::Error>> {
+        let provider = provider
+            .as_kafka_provider()
+            .with_context(|| InvalidProviderSnafu {
+                expected: KafkaProvider::type_name(),
+                actual: provider.type_name(),
+            })?;
+
+        metrics::METRIC_KAFKA_READ_CALLS_TOTAL.inc();
+        let _timer = metrics::METRIC_KAFKA_READ_ELAPSED.start_timer();
+
+        // Gets the client associated with the topic.
+        let client = self
+            .client_manager
+            .get_or_insert(provider)
+            .await?
+            .client()
+            .clone();
+
+        // Gets the offset of the latest record in the topic. Actually, it's the latest record of the single partition in the topic.
+        // The read operation terminates when this record is consumed.
+        // Warning: the `get_offset` returns the end offset of the latest record. For our usage, it should be decremented.
+        // See: https://kafka.apache.org/36/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html#endOffsets(java.util.Collection)
+        let end_offset = client
+            .get_offset(OffsetAt::Latest)
+            .await
+            .context(GetOffsetSnafu {
+                topic: &provider.topic,
+            })?
+            - 1;
+        // Reads entries with offsets in the range [start_offset, end_offset].
+        let start_offset = entry_id as i64;
+
+        debug!(
+            "Start reading entries in range [{}, {}] for ns {}",
+            start_offset, end_offset, provider
+        );
+
+        // Abort if there're no new entries.
+        // FIXME(niebayes): how come this case happens?
+        if start_offset > end_offset {
+            warn!(
+                "No new entries for ns {} in range [{}, {}]",
+                provider, start_offset, end_offset
+            );
+            return Ok(futures_util::stream::empty().boxed());
+        }
+
+        let mut stream_consumer =
+            Consumer::new(client, start_offset as u64, end_offset as u64, index);
+
+        // A buffer is used to collect records to construct a complete entry.
+        let mut entry_records: HashMap<RegionId, Vec<Record>> = HashMap::new();
+        let provider = provider.clone();
+
+        let stream = async_stream::stream!({
+            let mut total_bytes = 0;
+            while let Some(consume_result) = stream_consumer.next().await {
+                // Each next on the stream consumer produces a `RecordAndOffset` and a high watermark offset.
+                // The `RecordAndOffset` contains the record data and its start offset.
+                // The high watermark offset is the offset of the last record plus one.
+                let (record_and_offset, high_watermark) =
+                    consume_result.context(ConsumeRecordSnafu {
+                        topic: &provider.topic,
+                    })?;
+                let (kafka_record, offset) = (record_and_offset.record, record_and_offset.offset);
+
+                metrics::METRIC_KAFKA_READ_BYTES_TOTAL
+                    .inc_by(kafka_record.approximate_size() as u64);
+                total_bytes += kafka_record.approximate_size() as u64;
+
+                debug!(
+                    "Read a record at offset {} for topic {}, high watermark: {}",
+                    offset, provider.topic, high_watermark
+                );
+
+                // Ignores no-op records.
+                if kafka_record.value.is_none() {
+                    if check_termination(offset, end_offset) {
+                        if let Some(entries) = remaining_entries(&provider, &mut entry_records) {
+                            yield Ok(entries);
+                        }
+                        break;
+                    }
+                    continue;
+                }
+
+                let record = Record::try_from(kafka_record)?;
+                // Tries to construct an entry from records consumed so far.
+                if let Some(mut entry) = maybe_emit_entry(&provider, record, &mut entry_records)? {
+                    // We don't rely on the EntryId generated by mito2.
+                    // Instead, we use the offset return from Kafka as EntryId.
+                    // Therefore, we MUST overwrite the EntryId with RecordOffset.
+                    entry.set_entry_id(offset as u64);
+                    yield Ok(vec![entry]);
+                }
+
+                if check_termination(offset, end_offset) {
+                    if let Some(entries) = remaining_entries(&provider, &mut entry_records) {
+                        yield Ok(entries);
+                    }
+                    break;
+                }
+            }
+
+            info!(
+                "Reading entries(with index) in range [{}, {}] for ns {}, total bytes: {}",
+                start_offset, end_offset, provider, total_bytes
+            )
+        });
+        Ok(Box::pin(stream))
+    }
+
+    async fn index(
+        &self,
+        node_id: u64,
+        provider: &Provider,
+        region_id: RegionId,
+    ) -> Result<BTreeSet<u64>> {
+        let provider = provider
+            .as_kafka_provider()
+            .with_context(|| InvalidProviderSnafu {
+                expected: KafkaProvider::type_name(),
+                actual: provider.type_name(),
+            })?;
+        if let Some((_, operator)) = &self.index_supervisor {
+            let data = operator.read_with(&index_path(node_id)).await.unwrap();
+            let index: WalIndex = serde_json::from_slice(&data.to_bytes()).unwrap();
+            let index = index.find(&provider.topic, region_id).unwrap_or_default();
+
+            Ok(index)
+        } else {
+            Ok(BTreeSet::new())
+        }
+    }
+
     /// Creates a new `EntryStream` to asynchronously generates `Entry` with entry ids.
     /// Returns entries belonging to `provider`, starting from `entry_id`.
     async fn read(
@@ -309,7 +451,7 @@ impl LogStore for KafkaLogStore {
                     })?;
                 let (kafka_record, offset) = (record_and_offset.record, record_and_offset.offset);
 
-                metrics::METRIC_KAFKA_READ_RECORD_BYTES_TOTAL
+                metrics::METRIC_KAFKA_READ_BYTES_TOTAL
                     .inc_by(kafka_record.approximate_size() as u64);
 
                 debug!(

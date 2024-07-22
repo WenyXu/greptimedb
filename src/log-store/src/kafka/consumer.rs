@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -22,6 +22,7 @@ use common_telemetry::info;
 use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, Stream};
 use pin_project::pin_project;
+use rskafka::client::partition::PartitionClient;
 use rskafka::record::RecordAndOffset;
 use store_api::storage::RegionId;
 
@@ -30,7 +31,7 @@ pub trait WalIndexReader: Send + Sync {
 }
 
 #[async_trait::async_trait]
-trait FetchClient: std::fmt::Debug + Send + Sync {
+pub trait FetchClient: std::fmt::Debug + Send + Sync {
     /// Fetch records.
     ///
     /// Arguments are identical to [`PartitionClient::fetch_records`].
@@ -40,6 +41,18 @@ trait FetchClient: std::fmt::Debug + Send + Sync {
         bytes: Range<i32>,
         max_wait_ms: i32,
     ) -> rskafka::client::error::Result<(Vec<RecordAndOffset>, i64)>;
+}
+
+#[async_trait::async_trait]
+impl FetchClient for PartitionClient {
+    async fn fetch_records(
+        &self,
+        offset: i64,
+        bytes: Range<i32>,
+        max_wait_ms: i32,
+    ) -> rskafka::client::error::Result<(Vec<RecordAndOffset>, i64)> {
+        self.fetch_records(offset, bytes, max_wait_ms).await
+    }
 }
 
 struct FetchResult {
@@ -69,6 +82,32 @@ pub struct Consumer {
     terminated: bool,
 
     fetch_fut: Fuse<BoxFuture<'static, rskafka::client::error::Result<FetchResult>>>,
+}
+
+impl Consumer {
+    pub fn new(
+        client: Arc<dyn FetchClient>,
+        start_offset: u64,
+        end_offset: u64,
+        mut index: BTreeSet<u64>,
+    ) -> Self {
+        let index = index.split_off(&start_offset);
+        Self {
+            pruner: RecordPruner {
+                index: index.into_iter().collect::<VecDeque<_>>(),
+                buffer: VecDeque::new(),
+            },
+            last_high_watermark: 0,
+            client,
+            start_offset: start_offset as i64,
+            next_offset: start_offset as i64,
+            record_bytes: 512 * 1024,
+            end_offset: end_offset as i64,
+            max_wait_ms: 1000,
+            terminated: false,
+            fetch_fut: Fuse::terminated(),
+        }
+    }
 }
 
 struct RecordPruner {

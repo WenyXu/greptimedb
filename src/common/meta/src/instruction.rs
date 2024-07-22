@@ -153,6 +153,8 @@ pub struct UpgradeRegion {
     /// it's helpful to verify whether the leader region is ready.
     #[serde(with = "humantime_serde")]
     pub wait_for_replay_timeout: Option<Duration>,
+
+    pub from_datanode_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -27,6 +27,7 @@ use common_error::ext::BoxedError;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use prost::Message;
+use raw_entry_reader::LogStoreRawEntryReaderWithIndex;
 use snafu::ResultExt;
 use store_api::logstore::entry::Entry;
 use store_api::logstore::provider::Provider;
@@ -102,15 +103,28 @@ impl<S: LogStore> Wal<S> {
         &self,
         provider: &Provider,
         region_id: RegionId,
+        from_datanode_id: Option<u64>,
     ) -> Box<dyn WalEntryReader> {
         match provider {
             Provider::RaftEngine(_) => Box::new(LogStoreEntryReader::new(
                 LogStoreRawEntryReader::new(self.store.clone()),
             )),
-            Provider::Kafka(_) => Box::new(LogStoreEntryReader::new(RegionRawEntryReader::new(
-                LogStoreRawEntryReader::new(self.store.clone()),
-                region_id,
-            ))),
+            Provider::Kafka(_) => match from_datanode_id {
+                Some(from_datanode_id) => {
+                    Box::new(LogStoreEntryReader::new(RegionRawEntryReader::new(
+                        LogStoreRawEntryReaderWithIndex::new(
+                            self.store.clone(),
+                            region_id,
+                            from_datanode_id,
+                        ),
+                        region_id,
+                    )))
+                }
+                None => Box::new(LogStoreEntryReader::new(RegionRawEntryReader::new(
+                    LogStoreRawEntryReader::new(self.store.clone()),
+                    region_id,
+                ))),
+            },
         }
     }
 

@@ -77,6 +77,62 @@ impl<S: LogStore> RawEntryReader for LogStoreRawEntryReader<S> {
     }
 }
 
+pub struct LogStoreRawEntryReaderWithIndex<S> {
+    store: Arc<S>,
+    region_id: RegionId,
+    index_node_id: u64,
+}
+
+impl<S> LogStoreRawEntryReaderWithIndex<S> {
+    pub fn new(store: Arc<S>, region_id: RegionId, index_node_id: u64) -> Self {
+        Self {
+            store,
+            region_id,
+            index_node_id,
+        }
+    }
+}
+
+impl<S: LogStore> RawEntryReader for LogStoreRawEntryReaderWithIndex<S> {
+    fn read(&self, provider: &Provider, start_id: EntryId) -> Result<EntryStream<'static>> {
+        let store = self.store.clone();
+        let provider = provider.clone();
+        let region_id = self.region_id;
+        let index_node_id = self.index_node_id;
+        let stream = try_stream!({
+            let index = store
+                .index(index_node_id, &provider, region_id)
+                .await
+                .map_err(BoxedError::new)
+                .with_context(|_| error::ReadWalSnafu {
+                    provider: provider.clone(),
+                })?;
+            let mut stream = store
+                .read_with_index(&provider, index, start_id)
+                .await
+                .map_err(BoxedError::new)
+                .with_context(|_| error::ReadWalSnafu {
+                    provider: provider.clone(),
+                })?;
+
+            while let Some(entries) = stream.next().await {
+                let entries =
+                    entries
+                        .map_err(BoxedError::new)
+                        .with_context(|_| error::ReadWalSnafu {
+                            provider: provider.clone(),
+                        })?;
+
+                for entry in entries {
+                    yield entry
+                }
+            }
+        });
+
+        Ok(Box::pin(stream))
+    }
+}
+
 /// A [RawEntryReader] reads [RawEntry] belongs to a specific region.
 pub struct RegionRawEntryReader<R> {
     reader: R,
