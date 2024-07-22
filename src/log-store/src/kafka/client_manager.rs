@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
@@ -45,7 +46,7 @@ pub(crate) type ClientManagerRef = Arc<ClientManager>;
 pub(crate) struct Client {
     client: Arc<PartitionClient>,
     producer: OrderedBatchProducerRef,
-    index: Arc<Mutex<HashMap<RegionId, BTreeSet<u64>>>>,
+    pub(crate) index: Arc<Mutex<HashMap<RegionId, BTreeSet<u64>>>>,
 }
 
 impl Client {
@@ -68,8 +69,20 @@ impl Client {
 
     pub(crate) async fn obsolete(&self, region_id: RegionId, offset: u64) {
         let mut index = self.index.lock().await;
-        let offsets = index.entry(region_id).or_default();
-        *offsets = offsets.split_off(&offset);
+        match index.entry(region_id) {
+            Entry::Occupied(mut slot) => {
+                let offsets = slot.get_mut();
+                let new_offsets = offsets.split_off(&offset);
+                if new_offsets.is_empty() {
+                    slot.remove();
+                } else {
+                    *offsets = new_offsets;
+                }
+            }
+            Entry::Vacant(_) => {
+                // Do nothing
+            }
+        }
     }
 }
 
@@ -79,7 +92,7 @@ pub(crate) struct ClientManager {
     client: rskafka::client::Client,
     /// Used to initialize a new [Client].
     mutex: Mutex<()>,
-    instances: RwLock<HashMap<Arc<KafkaProvider>, Client>>,
+    pub(crate) instances: RwLock<HashMap<Arc<KafkaProvider>, Client>>,
 
     producer_channel_size: usize,
     producer_request_batch_size: usize,

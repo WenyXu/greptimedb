@@ -52,7 +52,10 @@ pub struct KafkaLogStore {
 
 impl KafkaLogStore {
     /// Tries to create a Kafka log store.
-    pub async fn try_new(config: &DatanodeKafkaConfig) -> Result<Self> {
+    pub async fn try_new(
+        config: &DatanodeKafkaConfig,
+        _shared_dir: Option<String>,
+    ) -> Result<Self> {
         let client_manager = Arc::new(ClientManager::try_new(config).await?);
 
         Ok(Self {
@@ -490,7 +493,7 @@ mod tests {
             max_batch_bytes: ReadableSize::kb(32),
             ..Default::default()
         };
-        let logstore = KafkaLogStore::try_new(&config).await.unwrap();
+        let logstore = KafkaLogStore::try_new(&config, None).await.unwrap();
         let topic_name = uuid::Uuid::new_v4().to_string();
         let provider = Provider::kafka_provider(topic_name);
         let region_entries = (0..5)
@@ -559,7 +562,7 @@ mod tests {
             max_batch_bytes: ReadableSize::kb(8),
             ..Default::default()
         };
-        let logstore = KafkaLogStore::try_new(&config).await.unwrap();
+        let logstore = KafkaLogStore::try_new(&config, None).await.unwrap();
         let topic_name = uuid::Uuid::new_v4().to_string();
         let provider = Provider::kafka_provider(topic_name);
         let region_entries = (0..5)

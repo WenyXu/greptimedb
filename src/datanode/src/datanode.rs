@@ -448,7 +448,7 @@ impl DatanodeBuilder {
 
     /// Builds [KafkaLogStore].
     async fn build_kafka_log_store(config: &DatanodeKafkaConfig) -> Result<Arc<KafkaLogStore>> {
-        KafkaLogStore::try_new(config)
+        KafkaLogStore::try_new(config, None)
             .await
             .map_err(Box::new)
             .context(OpenLogStoreSnafu)

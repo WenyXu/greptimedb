@@ -13,6 +13,10 @@
 // limitations under the License.
 
 pub(crate) mod client_manager;
+#[allow(dead_code)]
+pub mod consumer;
+#[allow(dead_code)]
+pub mod index;
 pub mod log_store;
 pub(crate) mod producer;
 pub(crate) mod util;
