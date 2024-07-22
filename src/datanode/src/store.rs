@@ -64,6 +64,27 @@ pub(crate) async fn new_object_store(
     Ok(store)
 }
 
+pub(crate) async fn new_object_store_without_cache(
+    store: ObjectStoreConfig,
+    data_home: &str,
+) -> Result<ObjectStore> {
+    let data_home = normalize_dir(data_home);
+    let object_store = match &store {
+        ObjectStoreConfig::File(file_config) => {
+            fs::new_fs_object_store(&data_home, file_config).await
+        }
+        ObjectStoreConfig::S3(s3_config) => s3::new_s3_object_store(s3_config).await,
+        ObjectStoreConfig::Oss(oss_config) => oss::new_oss_object_store(oss_config).await,
+        ObjectStoreConfig::Azblob(azblob_config) => {
+            azblob::new_azblob_object_store(azblob_config).await
+        }
+        ObjectStoreConfig::Gcs(gcs_config) => gcs::new_gcs_object_store(gcs_config).await,
+    }?;
+
+    let store = with_instrument_layers(object_store, true);
+    Ok(store)
+}
+
 async fn create_object_store_with_cache(
     object_store: ObjectStore,
     store_config: &ObjectStoreConfig,

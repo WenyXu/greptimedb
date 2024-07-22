@@ -32,10 +32,12 @@ pub trait IndexCreator: Send + Sync {
     async fn create(&self) -> Result<()>;
 }
 
+#[derive(Debug)]
 enum Instruction {
     Create,
 }
 
+#[derive(Debug)]
 pub(crate) struct IndexSupervisor {
     sender: Sender<Instruction>,
     handle: JoinHandle<()>,
@@ -74,9 +76,9 @@ impl IndexSupervisor {
 }
 
 pub(crate) struct NaiveIndexCreator {
-    client_manager: ClientManagerRef,
-    operator: object_store::ObjectStore,
-    node: u64,
+    pub(crate) client_manager: ClientManagerRef,
+    pub(crate) operator: object_store::ObjectStore,
+    pub(crate) node: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

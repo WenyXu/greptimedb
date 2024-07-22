@@ -31,6 +31,7 @@ use store_api::logstore::{AppendBatchResponse, LogStore, SendableEntryStream};
 use store_api::storage::RegionId;
 
 use super::client_manager::Client;
+use super::index::{IndexSupervisor, NaiveIndexCreator};
 use crate::error::{self, ConsumeRecordSnafu, Error, GetOffsetSnafu, InvalidProviderSnafu, Result};
 use crate::kafka::client_manager::{ClientManager, ClientManagerRef};
 use crate::kafka::producer::OrderedBatchProducerRef;
@@ -48,17 +49,40 @@ pub struct KafkaLogStore {
     max_batch_bytes: usize,
     /// The consumer wait timeout.
     consumer_wait_timeout: Duration,
+    #[allow(dead_code)]
+    index_supervisor: Option<IndexSupervisor>,
+}
+
+pub struct SharedDir {
+    pub node: u64,
+    pub operator: object_store::ObjectStore,
 }
 
 impl KafkaLogStore {
     /// Tries to create a Kafka log store.
     pub async fn try_new(
         config: &DatanodeKafkaConfig,
-        _shared_dir: Option<String>,
+        shared_dir: Option<SharedDir>,
     ) -> Result<Self> {
         let client_manager = Arc::new(ClientManager::try_new(config).await?);
 
+        let index_supervisor = if let Some(SharedDir { node, operator }) = shared_dir {
+            let index_supervisor = IndexSupervisor::new(
+                Box::new(NaiveIndexCreator {
+                    client_manager: client_manager.clone(),
+                    operator,
+                    node,
+                }),
+                Duration::from_secs(30),
+            );
+
+            Some(index_supervisor)
+        } else {
+            None
+        };
+
         Ok(Self {
+            index_supervisor,
             client_manager,
             max_batch_bytes: config.max_batch_bytes.as_bytes() as usize,
             consumer_wait_timeout: config.consumer_wait_timeout,

@@ -32,7 +32,7 @@ use common_wal::config::raft_engine::RaftEngineConfig;
 use common_wal::config::DatanodeWalConfig;
 use file_engine::engine::FileRegionEngine;
 use futures_util::TryStreamExt;
-use log_store::kafka::log_store::KafkaLogStore;
+use log_store::kafka::log_store::{KafkaLogStore, SharedDir};
 use log_store::raft_engine::log_store::RaftEngineLogStore;
 use meta_client::MetaClientRef;
 use metric_engine::engine::MetricEngine;
@@ -406,15 +406,24 @@ impl DatanodeBuilder {
             )
             .await
             .context(BuildMitoEngineSnafu)?,
-            DatanodeWalConfig::Kafka(kafka_config) => MitoEngine::new(
-                &opts.storage.data_home,
-                config,
-                Self::build_kafka_log_store(kafka_config).await?,
-                object_store_manager,
-                plugins,
-            )
-            .await
-            .context(BuildMitoEngineSnafu)?,
+            DatanodeWalConfig::Kafka(kafka_config) => {
+                let node_id = opts.node_id.unwrap();
+                let operator = store::new_object_store_without_cache(
+                    opts.storage.store.clone(),
+                    &opts.storage.data_home,
+                )
+                .await
+                .unwrap();
+                MitoEngine::new(
+                    &opts.storage.data_home,
+                    config,
+                    Self::build_kafka_log_store(kafka_config, operator, node_id).await?,
+                    object_store_manager,
+                    plugins,
+                )
+                .await
+                .context(BuildMitoEngineSnafu)?
+            }
         };
         Ok(mito_engine)
     }
@@ -447,8 +456,12 @@ impl DatanodeBuilder {
     }
 
     /// Builds [KafkaLogStore].
-    async fn build_kafka_log_store(config: &DatanodeKafkaConfig) -> Result<Arc<KafkaLogStore>> {
-        KafkaLogStore::try_new(config, None)
+    async fn build_kafka_log_store(
+        config: &DatanodeKafkaConfig,
+        operator: object_store::ObjectStore,
+        node: u64,
+    ) -> Result<Arc<KafkaLogStore>> {
+        KafkaLogStore::try_new(config, Some(SharedDir { node, operator }))
             .await
             .map_err(Box::new)
             .context(OpenLogStoreSnafu)
