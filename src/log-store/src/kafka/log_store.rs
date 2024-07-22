@@ -260,13 +260,16 @@ impl LogStore for KafkaLogStore {
         // The read operation terminates when this record is consumed.
         // Warning: the `get_offset` returns the end offset of the latest record. For our usage, it should be decremented.
         // See: https://kafka.apache.org/36/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html#endOffsets(java.util.Collection)
-        let end_offset = client
+        let mut end_offset = client
             .get_offset(OffsetAt::Latest)
             .await
             .context(GetOffsetSnafu {
                 topic: &provider.topic,
             })?
             - 1;
+        if let Some(last) = index.last() {
+            end_offset = *last as i64;
+        }
         // Reads entries with offsets in the range [start_offset, end_offset].
         let start_offset = entry_id as i64;
 

@@ -126,7 +126,7 @@ impl IndexCreator for NaiveIndexCreator {
         self.operator
             .write(
                 &index_path(self.node),
-                serde_json::to_string(&wal_index).unwrap(),
+                serde_json::to_string(&WalIndex { map: wal_index }).unwrap(),
             )
             .await
             .unwrap();
