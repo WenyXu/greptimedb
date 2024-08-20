@@ -44,6 +44,113 @@ pub struct RegionManifestOptions {
     pub checkpoint_distance: u64,
 }
 
+#[derive(Debug)]
+pub struct CurrentRegionManifest {
+    version: ManifestVersion,
+    manifest: Arc<RegionManifest>,
+}
+
+impl CurrentRegionManifest {
+    pub fn new(metadata: RegionMetadataRef) -> Result<Self> {
+        let version = MIN_VERSION;
+        let mut manifest_builder = RegionManifestBuilder::default();
+        // set the initial metadata.
+        manifest_builder.apply_change(version, RegionChange { metadata });
+        let manifest = Arc::new(manifest_builder.try_build()?);
+        Ok(Self { version, manifest })
+    }
+
+    /// Returns the [`RegionManifest`] ref.
+    pub fn manifest(&self) -> &Arc<RegionManifest> {
+        &self.manifest
+    }
+
+    /// Returns the [`ManifestVersion`].
+    pub fn version(&self) -> ManifestVersion {
+        self.version
+    }
+
+    pub fn open(
+        manifest_dir: &str,
+        mut manifest_builder: RegionManifestBuilder,
+        manifests: Vec<(ManifestVersion, RegionMetaActionList)>,
+    ) -> Result<Option<Self>> {
+        for (manifest_version, action_list) in manifests.into_iter() {
+            for action in action_list.actions {
+                match action {
+                    RegionMetaAction::Change(action) => {
+                        manifest_builder.apply_change(manifest_version, action);
+                    }
+                    RegionMetaAction::Edit(action) => {
+                        manifest_builder.apply_edit(manifest_version, action);
+                    }
+                    RegionMetaAction::Remove(_) => {
+                        debug!("Unhandled action in {}, action: {:?}", manifest_dir, action);
+                    }
+                    RegionMetaAction::Truncate(action) => {
+                        manifest_builder.apply_truncate(manifest_version, action);
+                    }
+                }
+            }
+        }
+
+        // Set the initial metadata if necessary
+        if !manifest_builder.contains_metadata() {
+            debug!("No region manifest in {}", manifest_dir);
+            return Ok(None);
+        }
+
+        let manifest = manifest_builder.try_build()?;
+        debug!(
+            "Recovered region manifest from {}, manifest: {:?}",
+            manifest_dir, manifest
+        );
+        let version = manifest.manifest_version;
+
+        Ok(Some(Self {
+            version,
+            manifest: Arc::new(manifest),
+        }))
+    }
+
+    /// Applies the manifest changes. Returns the new manifest version number.
+    pub fn apply(&mut self, action_list: RegionMetaActionList) -> Result<ManifestVersion> {
+        let version = self.increase_version();
+        let mut manifest_builder =
+            RegionManifestBuilder::with_checkpoint(Some(self.manifest.as_ref().clone()));
+        for action in action_list.actions {
+            match action {
+                RegionMetaAction::Change(action) => {
+                    manifest_builder.apply_change(version, action);
+                }
+                RegionMetaAction::Edit(action) => {
+                    manifest_builder.apply_edit(version, action);
+                }
+                RegionMetaAction::Remove(_) => {
+                    debug!(
+                        "Unhandled action for region {}, action: {:?}",
+                        self.manifest.metadata.region_id, action
+                    );
+                }
+                RegionMetaAction::Truncate(action) => {
+                    manifest_builder.apply_truncate(version, action);
+                }
+            }
+        }
+
+        let new_manifest = manifest_builder.try_build()?;
+        self.manifest = Arc::new(new_manifest);
+
+        Ok(version)
+    }
+
+    /// Increases last version and returns the increased version.
+    fn increase_version(&mut self) -> ManifestVersion {
+        self.version += 1;
+        self.version
+    }
+}
+
 // rewrite note:
 // trait Checkpoint -> struct RegionCheckpoint
 // trait MetaAction -> struct RegionMetaActionList
@@ -113,9 +220,8 @@ pub struct RegionManifestOptions {
 #[derive(Debug)]
 pub struct RegionManifestManager {
     store: ManifestObjectStore,
-    last_version: ManifestVersion,
     checkpointer: Checkpointer,
-    manifest: Arc<RegionManifest>,
+    current: CurrentRegionManifest,
     stopped: bool,
 }
 
@@ -139,21 +245,14 @@ impl RegionManifestManager {
             options.manifest_dir, metadata
         );
 
-        let version = MIN_VERSION;
-        let mut manifest_builder = RegionManifestBuilder::default();
-        // set the initial metadata.
-        manifest_builder.apply_change(
-            version,
-            RegionChange {
-                metadata: metadata.clone(),
-            },
-        );
-        let manifest = manifest_builder.try_build()?;
         let region_id = metadata.region_id;
+        let current = CurrentRegionManifest::new(metadata.clone())?;
+        let version = current.version();
 
         debug!(
             "Build region manifest in {}, manifest: {:?}",
-            options.manifest_dir, manifest
+            options.manifest_dir,
+            current.manifest(),
         );
 
         // Persist region change.
@@ -164,9 +263,8 @@ impl RegionManifestManager {
         let checkpointer = Checkpointer::new(region_id, options, store.clone(), MIN_VERSION);
         Ok(Self {
             store,
-            last_version: version,
             checkpointer,
-            manifest: Arc::new(manifest),
+            current,
             stopped: false,
         })
     }
@@ -199,7 +297,7 @@ impl RegionManifestManager {
             .as_ref()
             .map(|checkpoint| checkpoint.last_version)
             .unwrap_or(MIN_VERSION);
-        let mut manifest_builder = if let Some(checkpoint) = checkpoint {
+        let manifest_builder = if let Some(checkpoint) = checkpoint {
             info!(
                 "Recover region manifest {} from checkpoint version {}",
                 options.manifest_dir, checkpoint.last_version
@@ -216,56 +314,35 @@ impl RegionManifestManager {
 
         // apply actions from storage
         let manifests = store.fetch_manifests(version, MAX_VERSION).await?;
+        let manifests = manifests
+            .into_iter()
+            .map(|(manifest_version, raw_action_list)| {
+                // Set manifest size after last checkpoint
+                store.set_delta_file_size(manifest_version, raw_action_list.len() as u64);
 
-        for (manifest_version, raw_action_list) in manifests {
-            let action_list = RegionMetaActionList::decode(&raw_action_list)?;
-            // set manifest size after last checkpoint
-            store.set_delta_file_size(manifest_version, raw_action_list.len() as u64);
-            for action in action_list.actions {
-                match action {
-                    RegionMetaAction::Change(action) => {
-                        manifest_builder.apply_change(manifest_version, action);
-                    }
-                    RegionMetaAction::Edit(action) => {
-                        manifest_builder.apply_edit(manifest_version, action);
-                    }
-                    RegionMetaAction::Remove(_) => {
-                        debug!(
-                            "Unhandled action in {}, action: {:?}",
-                            options.manifest_dir, action
-                        );
-                    }
-                    RegionMetaAction::Truncate(action) => {
-                        manifest_builder.apply_truncate(manifest_version, action);
-                    }
-                }
-            }
-        }
+                Ok((
+                    manifest_version,
+                    RegionMetaActionList::decode(&raw_action_list)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        // set the initial metadata if necessary
-        if !manifest_builder.contains_metadata() {
-            debug!("No region manifest in {}", options.manifest_dir);
+        let Some(current) =
+            CurrentRegionManifest::open(&options.manifest_dir, manifest_builder, manifests)?
+        else {
             return Ok(None);
-        }
-
-        let manifest = manifest_builder.try_build()?;
-        debug!(
-            "Recovered region manifest from {}, manifest: {:?}",
-            options.manifest_dir, manifest
-        );
-        let version = manifest.manifest_version;
+        };
 
         let checkpointer = Checkpointer::new(
-            manifest.metadata.region_id,
+            current.manifest().metadata.region_id,
             options,
             store.clone(),
             last_checkpoint_version,
         );
         Ok(Some(Self {
             store,
-            last_version: version,
             checkpointer,
-            manifest: Arc::new(manifest),
+            current,
             stopped: false,
         }))
     }
@@ -273,6 +350,13 @@ impl RegionManifestManager {
     /// Stops the manager.
     pub async fn stop(&mut self) {
         self.stopped = true;
+    }
+
+    pub async fn apply_change(
+        &mut self,
+        action_list: RegionMetaActionList,
+    ) -> Result<ManifestVersion> {
+        self.current.apply(action_list)
     }
 
     /// Updates the manifest. Returns the current manifest version number.
@@ -284,46 +368,22 @@ impl RegionManifestManager {
         ensure!(
             !self.stopped,
             RegionStoppedSnafu {
-                region_id: self.manifest.metadata.region_id,
+                region_id: self.current.manifest().metadata.region_id,
             }
         );
 
-        let version = self.increase_version();
+        let version = self.current.version() + 1;
         self.store.save(version, &action_list.encode()?).await?;
-
-        let mut manifest_builder =
-            RegionManifestBuilder::with_checkpoint(Some(self.manifest.as_ref().clone()));
-        for action in action_list.actions {
-            match action {
-                RegionMetaAction::Change(action) => {
-                    manifest_builder.apply_change(version, action);
-                }
-                RegionMetaAction::Edit(action) => {
-                    manifest_builder.apply_edit(version, action);
-                }
-                RegionMetaAction::Remove(_) => {
-                    debug!(
-                        "Unhandled action for region {}, action: {:?}",
-                        self.manifest.metadata.region_id, action
-                    );
-                }
-                RegionMetaAction::Truncate(action) => {
-                    manifest_builder.apply_truncate(version, action);
-                }
-            }
-        }
-        let new_manifest = manifest_builder.try_build()?;
-        self.manifest = Arc::new(new_manifest);
-
+        let version = self.current.apply(action_list)?;
         self.checkpointer
-            .maybe_do_checkpoint(self.manifest.as_ref());
+            .maybe_do_checkpoint(self.current.manifest().as_ref());
 
         Ok(version)
     }
 
     /// Retrieves the current [RegionManifest].
     pub fn manifest(&self) -> Arc<RegionManifest> {
-        self.manifest.clone()
+        self.current.manifest().clone()
     }
 
     /// Returns total manifest size.
@@ -337,7 +397,7 @@ impl RegionManifestManager {
     /// It doesn't lock the manifest directory in the object store so the result
     /// may be inaccurate if there are concurrent writes.
     pub async fn has_update(&self) -> Result<bool> {
-        let last_version = self.last_version;
+        let last_version = self.current.version();
 
         let streamer =
             self.store
@@ -362,12 +422,6 @@ impl RegionManifestManager {
             .context(error::OpenDalSnafu)?;
 
         Ok(need_update)
-    }
-
-    /// Increases last version and returns the increased version.
-    fn increase_version(&mut self) -> ManifestVersion {
-        self.last_version += 1;
-        self.last_version
     }
 
     /// Fetches the last [RegionCheckpoint] from storage.
@@ -395,8 +449,11 @@ impl RegionManifestManager {
     fn validate_manifest(&self, expect: &RegionMetadataRef, last_version: ManifestVersion) {
         let manifest = self.manifest();
         assert_eq!(manifest.metadata, *expect);
-        assert_eq!(self.manifest.manifest_version, self.last_version);
-        assert_eq!(last_version, self.last_version);
+        assert_eq!(
+            self.current.manifest().manifest_version,
+            self.current.version()
+        );
+        assert_eq!(last_version, self.current.version());
     }
 
     pub fn store(&self) -> ManifestObjectStore {
