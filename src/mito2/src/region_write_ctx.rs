@@ -137,6 +137,7 @@ impl RegionWriteCtx {
             op_type,
             sequence: self.next_sequence,
             rows,
+            action_list: None,
         });
 
         let notify = WriteNotify::new(tx, num_rows);
@@ -150,6 +151,7 @@ impl RegionWriteCtx {
         match OpType::try_from(op_type) {
             Ok(OpType::Delete) => self.delete_num += num_rows,
             Ok(OpType::Put) => self.put_num += num_rows,
+            Ok(OpType::Manifest) => {}
             Err(_) => (),
         }
     }

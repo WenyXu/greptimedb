@@ -349,6 +349,7 @@ impl WriteRequest {
                         ),
                     })?
             }
+            OpType::Manifest => unreachable!(),
         };
 
         // Convert default value into proto's value.

@@ -1182,6 +1182,7 @@ mod tests {
                 schema: column_schema,
                 rows,
             }),
+            action_list: None,
         };
         KeyValues::new(schema.as_ref(), mutation).unwrap()
     }
