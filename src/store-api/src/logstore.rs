@@ -42,6 +42,15 @@ pub trait LogStore: Send + Sync + 'static + std::fmt::Debug {
     /// while the value is the id of the last successfully written entry of the region.
     async fn append_batch(&self, entries: Vec<Entry>) -> Result<AppendBatchResponse, Self::Error>;
 
+    async fn read_until<F: Fn(EntryId) -> bool + Send + 'static>(
+        &self,
+        _provider: &Provider,
+        _id: EntryId,
+        _condition: F,
+    ) -> Result<SendableEntryStream<'static, Entry, Self::Error>, Self::Error> {
+        todo!();
+    }
+
     /// Creates a new `EntryStream` to asynchronously generates `Entry` with ids
     /// starting from `id`.
     async fn read(

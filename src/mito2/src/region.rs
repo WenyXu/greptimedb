@@ -162,6 +162,11 @@ impl MitoRegion {
         self.manifest_ctx.state.load() == RegionState::Writable
     }
 
+    /// Returns whether the region is readonly.
+    pub(crate) fn is_readonly(&self) -> bool {
+        self.manifest_ctx.state.load() == RegionState::ReadOnly
+    }
+
     /// Returns the state of the region.
     pub(crate) fn state(&self) -> RegionState {
         self.manifest_ctx.state.load()
@@ -436,6 +441,41 @@ impl RegionMap {
         cb: &mut F,
     ) -> Option<MitoRegionRef> {
         match self.writable_region(region_id) {
+            Ok(region) => Some(region),
+            Err(e) => {
+                cb.on_failure(e);
+                None
+            }
+        }
+    }
+
+    /// Gets readonly region by region id.
+    ///
+    /// Returns error if the region does not exist or other RegionStatus.
+    pub(crate) fn readonly_region(&self, region_id: RegionId) -> Result<MitoRegionRef> {
+        let region = self
+            .get_region(region_id)
+            .context(RegionNotFoundSnafu { region_id })?;
+        ensure!(
+            region.is_readonly(),
+            RegionStateSnafu {
+                region_id,
+                state: region.state(),
+                expect: RegionState::ReadOnly,
+            }
+        );
+        Ok(region)
+    }
+
+    /// Gets readonly region by region id.
+    ///
+    /// Calls the callback if the region does not exist or other RegionStatus.
+    pub(crate) fn readonly_region_or<F: OnFailure>(
+        &self,
+        region_id: RegionId,
+        cb: &mut F,
+    ) -> Option<MitoRegionRef> {
+        match self.readonly_region(region_id) {
             Ok(region) => Some(region),
             Err(e) => {
                 cb.on_failure(e);

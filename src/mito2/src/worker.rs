@@ -23,6 +23,7 @@ mod handle_drop;
 mod handle_flush;
 mod handle_manifest;
 mod handle_open;
+mod handle_replication;
 mod handle_truncate;
 mod handle_write;
 
@@ -723,6 +724,9 @@ impl<S: LogStore> RegionWorkerLoop<S> {
         let mut ddl_requests = Vec::with_capacity(buffer.len());
         for worker_req in buffer.drain(..) {
             match worker_req {
+                WorkerRequest::Replication(replication_req) => {
+                    self.handle_replication(replication_req);
+                }
                 WorkerRequest::Write(sender_req) => {
                     write_requests.push(sender_req);
                 }

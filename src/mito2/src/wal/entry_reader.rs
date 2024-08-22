@@ -21,6 +21,7 @@ use snafu::{ensure, ResultExt};
 use store_api::logstore::entry::Entry;
 use store_api::logstore::provider::Provider;
 
+use super::raw_entry_reader::EntryStream;
 use crate::error::{CorruptedEntrySnafu, DecodeWalSnafu, Result};
 use crate::wal::raw_entry_reader::RawEntryReader;
 use crate::wal::{EntryId, WalEntryStream};
@@ -89,6 +90,30 @@ impl<R: RawEntryReader> WalEntryReader for LogStoreEntryReader<R> {
 
         Ok(Box::pin(stream))
     }
+}
+
+pub fn decode_stream(mut stream: EntryStream<'static>) -> WalEntryStream<'static> {
+    stream! {
+        let mut buffered_entry = None;
+        while let Some(next_entry) = stream.next().await {
+            match buffered_entry.take() {
+                Some(entry) => {
+                    yield decode_raw_entry(entry);
+                    buffered_entry = Some(next_entry?);
+                },
+                None => {
+                    buffered_entry = Some(next_entry?);
+                }
+            };
+        }
+        if let Some(entry) = buffered_entry {
+            // Ignores tail corrupted data.
+            if entry.is_complete() {
+                yield decode_raw_entry(entry);
+            }
+        }
+    }
+    .boxed()
 }
 
 #[cfg(test)]

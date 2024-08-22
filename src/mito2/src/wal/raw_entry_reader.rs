@@ -17,14 +17,14 @@ use std::sync::Arc;
 use async_stream::try_stream;
 use common_error::ext::BoxedError;
 use futures::stream::BoxStream;
+use futures::{StreamExt, TryStreamExt};
 use snafu::ResultExt;
 use store_api::logstore::entry::Entry;
 use store_api::logstore::provider::Provider;
-use store_api::logstore::LogStore;
+use store_api::logstore::{LogStore, SendableEntryStream};
 use store_api::storage::RegionId;
-use tokio_stream::StreamExt;
 
-use crate::error::{self, Result};
+use crate::error::{self, Error, Result};
 use crate::wal::EntryId;
 
 /// A stream that yields [Entry].
@@ -97,20 +97,45 @@ where
     R: RawEntryReader,
 {
     fn read(&self, ctx: &Provider, start_id: EntryId) -> Result<EntryStream<'static>> {
-        let mut stream = self.reader.read(ctx, start_id)?;
+        let stream = self.reader.read(ctx, start_id)?;
         let region_id = self.region_id;
 
-        let stream = try_stream!({
-            while let Some(entry) = stream.next().await {
-                let entry = entry?;
-                if entry.region_id() == region_id {
-                    yield entry
-                }
-            }
-        });
-
-        Ok(Box::pin(stream))
+        Ok(stream_filter(stream, region_id))
     }
+}
+
+pub fn stream_flatten<S: LogStore>(
+    mut stream: SendableEntryStream<'static, Entry, S::Error>,
+    provider: Provider,
+) -> EntryStream<'static> {
+    let stream = try_stream!({
+        while let Some(entries) = stream.next().await {
+            let entries =
+                entries
+                    .map_err(BoxedError::new)
+                    .with_context(|_| error::ReadWalSnafu {
+                        provider: provider.clone(),
+                    })?;
+
+            for entry in entries {
+                yield entry
+            }
+        }
+    });
+
+    stream.boxed()
+}
+
+pub fn stream_filter(stream: EntryStream<'_>, region_id: RegionId) -> EntryStream<'_> {
+    stream
+        .try_filter_map(move |entry| async move {
+            if entry.region_id() == region_id {
+                Ok(Some(entry))
+            } else {
+                Ok(None)
+            }
+        })
+        .boxed()
 }
 
 #[cfg(test)]

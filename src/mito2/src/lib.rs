@@ -37,6 +37,7 @@ mod metrics;
 pub mod read;
 pub mod region;
 mod region_write_ctx;
+mod replicator;
 pub mod request;
 pub mod row_converter;
 pub mod schedule;

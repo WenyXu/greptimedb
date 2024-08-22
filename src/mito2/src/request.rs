@@ -15,6 +15,7 @@
 //! Worker requests.
 
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -23,7 +24,7 @@ use api::helper::{
     ColumnDataTypeWrapper,
 };
 use api::v1::column_def::options_from_column_schema;
-use api::v1::{ColumnDataType, ColumnSchema, OpType, Rows, SemanticType, Value};
+use api::v1::{ColumnDataType, ColumnSchema, OpType, Rows, SemanticType, Value, WalEntry};
 use common_telemetry::info;
 use datatypes::prelude::DataType;
 use prometheus::HistogramTimer;
@@ -467,6 +468,23 @@ pub(crate) struct SenderWriteRequest {
     pub(crate) request: WriteRequest,
 }
 
+/// Sender and replication request.
+pub(crate) struct SenderReplicationRequest {
+    /// Result sender.
+    pub(crate) region_id: RegionId,
+    pub(crate) sender: OptionOutputTx,
+    pub(crate) entry_id: EntryId,
+    pub(crate) wal_entry: WalEntry,
+}
+
+impl Debug for SenderReplicationRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SenderReplicationRequest")
+            .field("sender", &self.sender)
+            .finish()
+    }
+}
+
 /// Request sent to a worker
 #[derive(Debug)]
 pub(crate) enum WorkerRequest {
@@ -497,9 +515,27 @@ pub(crate) enum WorkerRequest {
 
     /// Use [RegionEdit] to edit a region directly.
     EditRegion(RegionEditRequest),
+
+    Replication(SenderReplicationRequest),
 }
 
 impl WorkerRequest {
+    pub(crate) fn new_region_replication_request(
+        region_id: RegionId,
+        entry_id: EntryId,
+        wal_entry: WalEntry,
+    ) -> (WorkerRequest, Receiver<Result<AffectedRows>>) {
+        let (sender, receiver) = oneshot::channel();
+        let worker_request = WorkerRequest::Replication(SenderReplicationRequest {
+            region_id,
+            sender: sender.into(),
+            entry_id,
+            wal_entry,
+        });
+
+        (worker_request, receiver)
+    }
+
     pub(crate) fn new_open_region_request(
         region_id: RegionId,
         request: RegionOpenRequest,
