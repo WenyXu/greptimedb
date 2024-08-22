@@ -18,7 +18,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use common_telemetry::{info, warn};
+use common_telemetry::{error, info, warn};
 use store_api::logstore::LogStore;
 use store_api::manifest::ManifestVersion;
 use store_api::storage::RegionId;
@@ -256,7 +256,10 @@ where
     }
 
     /// Handles region change result.
-    pub(crate) fn handle_manifest_region_change_result(&self, change_result: RegionChangeResult) {
+    pub(crate) async fn handle_manifest_region_change_result(
+        &mut self,
+        change_result: RegionChangeResult,
+    ) {
         let region = match self.regions.get_region(change_result.region_id) {
             Some(region) => region,
             None => {
@@ -270,7 +273,19 @@ where
             }
         };
 
-        if change_result.result.is_ok() {
+        if let Ok(next_version) = change_result.result {
+            if let Err(err) = self
+                .record_manifest_actions(
+                    &region,
+                    next_version,
+                    RegionMetaActionList::with_action(RegionMetaAction::Change(RegionChange {
+                        metadata: change_result.new_meta.clone(),
+                    })),
+                )
+                .await
+            {
+                error!(err; "Failed to record manifest action, action: RegionChange");
+            }
             // Apply the metadata to region's version.
             region
                 .version_control

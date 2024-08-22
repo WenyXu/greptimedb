@@ -223,6 +223,7 @@ fn is_valid_region_edit(edit: &RegionEdit) -> bool {
         && matches!(
             edit,
             RegionEdit {
+                reason: _,
                 files_to_add: _,
                 files_to_remove: _,
                 compaction_time_window: None,
@@ -628,12 +629,14 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::manifest::action::RegionEditReason;
     use crate::sst::file::FileMeta;
 
     #[test]
     fn test_is_valid_region_edit() {
         // Valid: has only "files_to_add"
         let edit = RegionEdit {
+            reason: RegionEditReason::Flush,
             files_to_add: vec![FileMeta::default()],
             files_to_remove: vec![],
             compaction_time_window: None,
@@ -644,6 +647,7 @@ mod tests {
 
         // Invalid: "files_to_add" is empty
         let edit = RegionEdit {
+            reason: RegionEditReason::Flush,
             files_to_add: vec![],
             files_to_remove: vec![],
             compaction_time_window: None,
@@ -654,6 +658,7 @@ mod tests {
 
         // Invalid: "files_to_remove" is not empty
         let edit = RegionEdit {
+            reason: RegionEditReason::Flush,
             files_to_add: vec![FileMeta::default()],
             files_to_remove: vec![FileMeta::default()],
             compaction_time_window: None,
@@ -664,6 +669,7 @@ mod tests {
 
         // Invalid: other fields are not all "None"s
         let edit = RegionEdit {
+            reason: RegionEditReason::Flush,
             files_to_add: vec![FileMeta::default()],
             files_to_remove: vec![],
             compaction_time_window: Some(Duration::from_secs(1)),
@@ -672,6 +678,7 @@ mod tests {
         };
         assert!(!is_valid_region_edit(&edit));
         let edit = RegionEdit {
+            reason: RegionEditReason::Flush,
             files_to_add: vec![FileMeta::default()],
             files_to_remove: vec![],
             compaction_time_window: None,
@@ -680,6 +687,7 @@ mod tests {
         };
         assert!(!is_valid_region_edit(&edit));
         let edit = RegionEdit {
+            reason: RegionEditReason::Flush,
             files_to_add: vec![FileMeta::default()],
             files_to_remove: vec![],
             compaction_time_window: None,

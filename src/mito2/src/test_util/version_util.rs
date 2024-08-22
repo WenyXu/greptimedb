@@ -25,7 +25,7 @@ use datatypes::schema::ColumnSchema;
 use store_api::metadata::{ColumnMetadata, RegionMetadata, RegionMetadataBuilder};
 use store_api::storage::RegionId;
 
-use crate::manifest::action::RegionEdit;
+use crate::manifest::action::{RegionEdit, RegionEditReason};
 use crate::memtable::time_partition::TimePartitions;
 use crate::memtable::{KeyValues, MemtableBuilderRef};
 use crate::region::version::{Version, VersionBuilder, VersionControl};
@@ -174,6 +174,7 @@ pub(crate) fn write_rows_to_version(
 /// `files_to_add` are slice of `(start_ms, end_ms)`.
 pub(crate) fn apply_edit(
     version_control: &VersionControl,
+    reason: RegionEditReason,
     files_to_add: &[(i64, i64)],
     files_to_remove: &[FileMeta],
     purger: FilePurgerRef,
@@ -201,6 +202,7 @@ pub(crate) fn apply_edit(
 
     version_control.apply_edit(
         RegionEdit {
+            reason,
             files_to_add,
             files_to_remove: files_to_remove.to_vec(),
             compaction_time_window: None,

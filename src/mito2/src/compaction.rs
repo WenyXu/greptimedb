@@ -624,6 +624,7 @@ mod tests {
     use tokio::sync::oneshot;
 
     use super::*;
+    use crate::manifest::action::RegionEditReason;
     use crate::test_util::scheduler_util::{SchedulerEnv, VecScheduler};
     use crate::test_util::version_util::{apply_edit, VersionControlBuilder};
 
@@ -724,6 +725,7 @@ mod tests {
         // 5 files for next compaction and removes old files.
         apply_edit(
             &version_control,
+            RegionEditReason::Compaction,
             &[(0, end), (20, end), (40, end), (60, end), (80, end)],
             &file_metas,
             purger.clone(),
@@ -758,6 +760,7 @@ mod tests {
         // 5 files for next compaction.
         apply_edit(
             &version_control,
+            RegionEditReason::Compaction,
             &[(0, end), (20, end), (40, end), (60, end), (80, end)],
             &[],
             purger.clone(),

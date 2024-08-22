@@ -48,7 +48,15 @@ pub struct RegionChange {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum RegionEditReason {
+    Flush,
+    Compaction,
+    Manual,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct RegionEdit {
+    pub reason: RegionEditReason,
     pub files_to_add: Vec<FileMeta>,
     pub files_to_remove: Vec<FileMeta>,
     #[serde(with = "humantime_serde")]
@@ -219,6 +227,13 @@ impl RegionMetaActionList {
 }
 
 impl RegionMetaActionList {
+    /// Encode self into json in the form of string lines.
+    pub fn encode_str(&self) -> Result<String> {
+        let json = serde_json::to_string(&self).context(SerdeJsonSnafu)?;
+
+        Ok(json)
+    }
+
     /// Encode self into json in the form of string lines.
     pub fn encode(&self) -> Result<Vec<u8>> {
         let json = serde_json::to_string(&self).context(SerdeJsonSnafu)?;

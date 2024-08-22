@@ -14,12 +14,12 @@
 
 //! Handling truncate related requests.
 
-use common_telemetry::info;
+use common_telemetry::{error, info};
 use store_api::logstore::LogStore;
 use store_api::storage::RegionId;
 
 use crate::error::RegionNotFoundSnafu;
-use crate::manifest::action::RegionTruncate;
+use crate::manifest::action::{RegionMetaAction, RegionMetaActionList, RegionTruncate};
 use crate::region::RegionState;
 use crate::request::{OptionOutputTx, TruncateResult};
 use crate::worker::RegionWorkerLoop;
@@ -66,7 +66,23 @@ impl<S: LogStore> RegionWorkerLoop<S> {
         region.switch_state_to_writable(RegionState::Truncating);
 
         match truncate_result.result {
-            Ok(_) => {
+            Ok(next_version) => {
+                if let Err(err) = self
+                    .record_manifest_actions(
+                        &region,
+                        next_version,
+                        RegionMetaActionList::with_action(RegionMetaAction::Truncate(
+                            RegionTruncate {
+                                region_id,
+                                truncated_entry_id: truncate_result.truncated_entry_id,
+                                truncated_sequence: truncate_result.truncated_sequence,
+                            },
+                        )),
+                    )
+                    .await
+                {
+                    error!(err; "Failed to record manifest action, action: RegionTruncate");
+                }
                 // Applies the truncate action to the region.
                 region.version_control.truncate(
                     truncate_result.truncated_entry_id,

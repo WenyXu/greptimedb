@@ -21,6 +21,7 @@ use object_store::manager::ObjectStoreManagerRef;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use snafu::{OptionExt, ResultExt};
+use store_api::manifest::ManifestVersion;
 use store_api::metadata::RegionMetadataRef;
 use store_api::storage::RegionId;
 
@@ -30,7 +31,9 @@ use crate::compaction::picker::{new_picker, PickerOutput};
 use crate::compaction::CompactionSstReaderBuilder;
 use crate::config::MitoConfig;
 use crate::error::{EmptyRegionDirSnafu, JoinSnafu, ObjectStoreNotFoundSnafu, Result};
-use crate::manifest::action::{RegionEdit, RegionMetaAction, RegionMetaActionList};
+use crate::manifest::action::{
+    RegionEdit, RegionEditReason, RegionMetaAction, RegionMetaActionList,
+};
 use crate::manifest::manager::{RegionManifestManager, RegionManifestOptions};
 use crate::manifest::storage::manifest_compress_type;
 use crate::memtable::time_partition::TimePartitions;
@@ -217,7 +220,7 @@ pub trait Compactor: Send + Sync + 'static {
         &self,
         compaction_region: &CompactionRegion,
         merge_output: MergeOutput,
-    ) -> Result<RegionEdit>;
+    ) -> Result<(ManifestVersion, RegionEdit)>;
 
     /// Execute compaction for a region.
     async fn compact(
@@ -364,9 +367,10 @@ impl Compactor for DefaultCompactor {
         &self,
         compaction_region: &CompactionRegion,
         merge_output: MergeOutput,
-    ) -> Result<RegionEdit> {
+    ) -> Result<(ManifestVersion, RegionEdit)> {
         // Write region edit to manifest.
         let edit = RegionEdit {
+            reason: RegionEditReason::Compaction,
             files_to_add: merge_output.files_to_add,
             files_to_remove: merge_output.files_to_remove,
             compaction_time_window: merge_output
@@ -378,12 +382,12 @@ impl Compactor for DefaultCompactor {
 
         let action_list = RegionMetaActionList::with_action(RegionMetaAction::Edit(edit.clone()));
         // TODO: We might leak files if we fail to update manifest. We can add a cleanup task to remove them later.
-        compaction_region
+        let version = compaction_region
             .manifest_ctx
             .update_manifest(Writable, action_list)
             .await?;
 
-        Ok(edit)
+        Ok((version, edit))
     }
 
     // The default implementation of compact combines the merge_ssts and update_manifest functions.

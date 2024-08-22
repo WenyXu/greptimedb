@@ -18,6 +18,7 @@ use store_api::region_request::RegionCompactRequest;
 use store_api::storage::RegionId;
 
 use crate::error::RegionNotFoundSnafu;
+use crate::manifest::action::{RegionMetaAction, RegionMetaActionList};
 use crate::metrics::COMPACTION_REQUEST_COUNT;
 use crate::request::{CompactionFailed, CompactionFinished, OnFailure, OptionOutputTx};
 use crate::worker::RegionWorkerLoop;
@@ -68,6 +69,17 @@ impl<S: LogStore> RegionWorkerLoop<S> {
                 return;
             }
         };
+
+        if let Err(err) = self
+            .record_manifest_actions(
+                &region,
+                request.manifest_version,
+                RegionMetaActionList::with_action(RegionMetaAction::Edit(request.edit.clone())),
+            )
+            .await
+        {
+            error!(err; "Failed to record manifest action, action: Compaction");
+        }
 
         region
             .version_control

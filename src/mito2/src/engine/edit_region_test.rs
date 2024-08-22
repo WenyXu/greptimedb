@@ -22,7 +22,7 @@ use tokio::sync::Barrier;
 
 use crate::config::MitoConfig;
 use crate::engine::MitoEngine;
-use crate::manifest::action::RegionEdit;
+use crate::manifest::action::{RegionEdit, RegionEditReason};
 use crate::region::MitoRegionRef;
 use crate::sst::file::{FileId, FileMeta};
 use crate::test_util::{CreateRequestBuilder, TestEnv};
@@ -61,6 +61,7 @@ async fn test_edit_region_concurrently() {
         async fn edit_region(self, engine: MitoEngine) {
             for sst in self.ssts {
                 let edit = RegionEdit {
+                    reason: RegionEditReason::Manual,
                     files_to_add: vec![sst],
                     files_to_remove: vec![],
                     compaction_time_window: None,

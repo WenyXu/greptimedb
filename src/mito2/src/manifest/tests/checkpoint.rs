@@ -22,7 +22,7 @@ use strum::IntoEnumIterator;
 
 use crate::error::Error::ChecksumMismatch;
 use crate::manifest::action::{
-    RegionCheckpoint, RegionEdit, RegionMetaAction, RegionMetaActionList,
+    RegionCheckpoint, RegionEdit, RegionEditReason, RegionMetaAction, RegionMetaActionList,
 };
 use crate::manifest::manager::RegionManifestManager;
 use crate::manifest::tests::utils::basic_region_metadata;
@@ -57,6 +57,7 @@ async fn reopen_manager(
 
 fn nop_action() -> RegionMetaActionList {
     RegionMetaActionList::new(vec![RegionMetaAction::Edit(RegionEdit {
+        reason: RegionEditReason::Flush,
         files_to_add: vec![],
         files_to_remove: vec![],
         compaction_time_window: None,
@@ -225,6 +226,7 @@ async fn checkpoint_with_different_compression_types() {
             num_row_groups: 0,
         };
         let action = RegionMetaActionList::new(vec![RegionMetaAction::Edit(RegionEdit {
+            reason: RegionEditReason::Flush,
             files_to_add: vec![file_meta],
             files_to_remove: vec![],
             compaction_time_window: None,

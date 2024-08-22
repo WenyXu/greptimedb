@@ -104,7 +104,7 @@ impl VersionControl {
         edit: RegionEdit,
         memtables_to_remove: &[MemtableId],
         purger: FilePurgerRef,
-    ) {
+    ) -> VersionRef {
         let version = self.current().version;
         let new_version = Arc::new(
             VersionBuilder::from_version(version)
@@ -114,7 +114,8 @@ impl VersionControl {
         );
 
         let mut version_data = self.data.write().unwrap();
-        version_data.version = new_version;
+        version_data.version = new_version.clone();
+        new_version
     }
 
     /// Mark all opened files as deleted and set the delete marker in [VersionControlData]
@@ -142,7 +143,11 @@ impl VersionControl {
     ///
     /// It replaces existing mutable memtable with a memtable that uses the
     /// new schema. Memtables of the version must be empty.
-    pub(crate) fn alter_schema(&self, metadata: RegionMetadataRef, builder: &MemtableBuilderRef) {
+    pub(crate) fn alter_schema(
+        &self,
+        metadata: RegionMetadataRef,
+        builder: &MemtableBuilderRef,
+    ) -> VersionRef {
         let version = self.current().version;
         let part_duration = version.memtables.mutable.part_duration();
         let next_memtable_id = version.memtables.mutable.next_memtable_id();
@@ -162,7 +167,8 @@ impl VersionControl {
         );
 
         let mut version_data = self.data.write().unwrap();
-        version_data.version = new_version;
+        version_data.version = new_version.clone();
+        new_version
     }
 
     /// Truncate current version.
@@ -171,7 +177,7 @@ impl VersionControl {
         truncated_entry_id: EntryId,
         truncated_sequence: SequenceNumber,
         memtable_builder: &MemtableBuilderRef,
-    ) {
+    ) -> VersionRef {
         let version = self.current().version;
 
         let part_duration = version.memtables.mutable.part_duration();
@@ -192,7 +198,8 @@ impl VersionControl {
 
         let mut version_data = self.data.write().unwrap();
         version_data.version.ssts.mark_all_deleted();
-        version_data.version = new_version;
+        version_data.version = new_version.clone();
+        new_version
     }
 }
 

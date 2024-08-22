@@ -518,6 +518,18 @@ pub enum Error {
         location: Location,
     },
 
+    #[snafu(display(
+        "Invalid manifest action list, next version: {}, current version: {}",
+        next_version,
+        version
+    ))]
+    InvalidManifestActionList {
+        next_version: u64,
+        version: u64,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
     #[snafu(display("Failed to read arrow record batch from parquet file {}", path))]
     ArrowReader {
         path: String,
@@ -920,7 +932,8 @@ impl ErrorExt for Error {
             | EncodeMemtable { .. }
             | ReadDataPart { .. }
             | CorruptedEntry { .. }
-            | BuildEntry { .. } => StatusCode::Internal,
+            | BuildEntry { .. }
+            | InvalidManifestActionList { .. } => StatusCode::Internal,
 
             OpenRegion { source, .. } => source.status_code(),
 

@@ -39,6 +39,7 @@ use prometheus::IntGauge;
 use rand::{thread_rng, Rng};
 use snafu::{ensure, ResultExt};
 use store_api::logstore::LogStore;
+use store_api::manifest::ManifestVersion;
 use store_api::region_engine::SetReadonlyResponse;
 use store_api::storage::RegionId;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -48,11 +49,15 @@ use crate::cache::write_cache::{WriteCache, WriteCacheRef};
 use crate::cache::{CacheManager, CacheManagerRef};
 use crate::compaction::CompactionScheduler;
 use crate::config::MitoConfig;
-use crate::error::{JoinSnafu, Result, WorkerStoppedSnafu};
+use crate::error::{JoinSnafu, RegionStateSnafu, Result, WorkerStoppedSnafu};
 use crate::flush::{FlushScheduler, WriteBufferManagerImpl, WriteBufferManagerRef};
+use crate::manifest::action::RegionMetaActionList;
+use crate::manifest_recorder::ManifestActionRecorder;
 use crate::memtable::MemtableBuilderProvider;
 use crate::metrics::{REGION_COUNT, WRITE_STALL_TOTAL};
-use crate::region::{MitoRegionRef, OpeningRegions, OpeningRegionsRef, RegionMap, RegionMapRef};
+use crate::region::{
+    MitoRegionRef, OpeningRegions, OpeningRegionsRef, RegionMap, RegionMapRef, RegionState,
+};
 use crate::request::{
     BackgroundNotify, DdlRequest, SenderDdlRequest, SenderWriteRequest, WorkerRequest,
 };
@@ -823,9 +828,38 @@ impl<S: LogStore> RegionWorkerLoop<S> {
             }
             BackgroundNotify::CompactionFailed(req) => self.handle_compaction_failure(req).await,
             BackgroundNotify::Truncate(req) => self.handle_truncate_result(req).await,
-            BackgroundNotify::RegionChange(req) => self.handle_manifest_region_change_result(req),
+            BackgroundNotify::RegionChange(req) => {
+                self.handle_manifest_region_change_result(req).await
+            }
             BackgroundNotify::RegionEdit(req) => self.handle_region_edit_result(req).await,
         }
+    }
+
+    pub(crate) async fn record_manifest_actions(
+        &mut self,
+        region: &MitoRegionRef,
+        next_version: ManifestVersion,
+        action_list: RegionMetaActionList,
+    ) -> Result<()> {
+        ensure!(
+            region.is_writable(),
+            RegionStateSnafu {
+                region_id: region.region_id,
+                state: region.state(),
+                expect: RegionState::Writable,
+            }
+        );
+
+        let mut recorder = ManifestActionRecorder::new(
+            region.region_id,
+            &region.version_control,
+            region.provider.clone(),
+        );
+        recorder.push_action_list(next_version, action_list)?;
+        let mut writer = self.wal.writer();
+        recorder.add_wal_entry(&mut writer)?;
+        recorder.finish();
+        Ok(())
     }
 
     /// Handles `set_readonly_gracefully`.

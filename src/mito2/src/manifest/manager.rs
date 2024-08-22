@@ -23,7 +23,7 @@ use snafu::{ensure, OptionExt, ResultExt};
 use store_api::manifest::{ManifestVersion, MAX_VERSION, MIN_VERSION};
 use store_api::metadata::RegionMetadataRef;
 
-use crate::error::{self, RegionStoppedSnafu, Result};
+use crate::error::{self, InvalidManifestActionListSnafu, RegionStoppedSnafu, Result};
 use crate::manifest::action::{
     RegionChange, RegionCheckpoint, RegionManifest, RegionManifestBuilder, RegionMetaAction,
     RegionMetaActionList,
@@ -114,8 +114,11 @@ impl CurrentRegionManifest {
     }
 
     /// Applies the manifest changes. Returns the new manifest version number.
-    pub fn apply(&mut self, action_list: RegionMetaActionList) -> Result<ManifestVersion> {
-        let version = self.increase_version();
+    pub fn apply(
+        &mut self,
+        version: ManifestVersion,
+        action_list: RegionMetaActionList,
+    ) -> Result<ManifestVersion> {
         let mut manifest_builder =
             RegionManifestBuilder::with_checkpoint(Some(self.manifest.as_ref().clone()));
         for action in action_list.actions {
@@ -142,12 +145,6 @@ impl CurrentRegionManifest {
         self.manifest = Arc::new(new_manifest);
 
         Ok(version)
-    }
-
-    /// Increases last version and returns the increased version.
-    fn increase_version(&mut self) -> ManifestVersion {
-        self.version += 1;
-        self.version
     }
 }
 
@@ -352,13 +349,6 @@ impl RegionManifestManager {
         self.stopped = true;
     }
 
-    pub async fn apply_change(
-        &mut self,
-        action_list: RegionMetaActionList,
-    ) -> Result<ManifestVersion> {
-        self.current.apply(action_list)
-    }
-
     /// Updates the manifest. Returns the current manifest version number.
     pub async fn update(&mut self, action_list: RegionMetaActionList) -> Result<ManifestVersion> {
         let _t = MANIFEST_OP_ELAPSED
@@ -374,11 +364,33 @@ impl RegionManifestManager {
 
         let version = self.current.version() + 1;
         self.store.save(version, &action_list.encode()?).await?;
-        let version = self.current.apply(action_list)?;
+        let version = self.current.apply(version, action_list)?;
         self.checkpointer
             .maybe_do_checkpoint(self.current.manifest().as_ref());
 
         Ok(version)
+    }
+
+    pub async fn apply(
+        &mut self,
+        next_version: u64,
+        action_list: RegionMetaActionList,
+    ) -> Result<()> {
+        if next_version == self.current.version {
+            return Ok(());
+        }
+
+        ensure!(
+            next_version == self.current.version,
+            InvalidManifestActionListSnafu {
+                next_version,
+                version: self.current.version
+            }
+        );
+
+        self.current.apply(next_version, action_list)?;
+
+        Ok(())
     }
 
     /// Retrieves the current [RegionManifest].
@@ -473,7 +485,7 @@ mod test {
     use store_api::metadata::{ColumnMetadata, RegionMetadataBuilder};
 
     use super::*;
-    use crate::manifest::action::{RegionChange, RegionEdit};
+    use crate::manifest::action::{RegionChange, RegionEdit, RegionEditReason};
     use crate::manifest::tests::utils::basic_region_metadata;
     use crate::test_util::TestEnv;
 
@@ -618,6 +630,7 @@ mod test {
             manager
                 .update(RegionMetaActionList::new(vec![RegionMetaAction::Edit(
                     RegionEdit {
+                        reason: RegionEditReason::Flush,
                         files_to_add: vec![],
                         files_to_remove: vec![],
                         compaction_time_window: None,

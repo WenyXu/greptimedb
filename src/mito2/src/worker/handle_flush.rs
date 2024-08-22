@@ -25,6 +25,7 @@ use store_api::storage::RegionId;
 use crate::config::MitoConfig;
 use crate::error::{RegionNotFoundSnafu, Result};
 use crate::flush::{FlushReason, RegionFlushTask};
+use crate::manifest::action::{RegionMetaAction, RegionMetaActionList};
 use crate::region::MitoRegionRef;
 use crate::request::{FlushFailed, FlushFinished, OnFailure, OptionOutputTx};
 use crate::worker::RegionWorkerLoop;
@@ -200,6 +201,17 @@ impl<S: LogStore> RegionWorkerLoop<S> {
                 request.on_failure(RegionNotFoundSnafu { region_id }.build());
                 return;
             }
+        };
+
+        if let Err(err) = self
+            .record_manifest_actions(
+                &region,
+                request.manifest_version,
+                RegionMetaActionList::with_action(RegionMetaAction::Edit(request.edit.clone())),
+            )
+            .await
+        {
+            error!(err; "Failed to record manifest action, action: Flush");
         };
 
         region.version_control.apply_edit(
