@@ -27,6 +27,7 @@ use common_telemetry::{error, info, warn};
 use crossbeam_utils::atomic::AtomicCell;
 use snafu::{ensure, OptionExt};
 use store_api::logstore::provider::Provider;
+use store_api::manifest::ManifestVersion;
 use store_api::metadata::RegionMetadataRef;
 use store_api::storage::RegionId;
 
@@ -306,7 +307,7 @@ impl ManifestContext {
         &self,
         expect_state: RegionState,
         action_list: RegionMetaActionList,
-    ) -> Result<()> {
+    ) -> Result<ManifestVersion> {
         // Acquires the write lock of the manifest manager.
         let mut manager = self.manifest_manager.write().await;
         // Gets current manifest.
@@ -359,7 +360,7 @@ impl ManifestContext {
         }
 
         // Now we can update the manifest.
-        manager.update(action_list).await.inspect_err(
+        let version = manager.update(action_list).await.inspect_err(
             |e| error!(e; "Failed to update manifest, region_id: {}", manifest.metadata.region_id),
         )?;
 
@@ -370,7 +371,7 @@ impl ManifestContext {
             );
         }
 
-        Ok(())
+        Ok(version)
     }
 }
 

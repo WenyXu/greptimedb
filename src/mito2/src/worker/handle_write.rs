@@ -128,7 +128,10 @@ impl<S: LogStore> RegionWorkerLoop<S> {
     }
 }
 
-impl<S> RegionWorkerLoop<S> {
+impl<S> RegionWorkerLoop<S>
+where
+    S: LogStore,
+{
     /// Validates and groups requests by region.
     fn prepare_region_write_ctx(
         &mut self,

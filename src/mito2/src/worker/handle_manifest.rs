@@ -19,6 +19,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use common_telemetry::{info, warn};
+use store_api::logstore::LogStore;
+use store_api::manifest::ManifestVersion;
 use store_api::storage::RegionId;
 
 use crate::error::{RegionBusySnafu, RegionNotFoundSnafu, Result};
@@ -71,7 +73,10 @@ impl RegionEditQueue {
     }
 }
 
-impl<S> RegionWorkerLoop<S> {
+impl<S> RegionWorkerLoop<S>
+where
+    S: LogStore,
+{
     /// Handles region edit request.
     pub(crate) async fn handle_region_edit(&mut self, request: RegionEditRequest) {
         let region_id = request.region_id;
@@ -153,7 +158,7 @@ impl<S> RegionWorkerLoop<S> {
         // Sets the region as writable.
         region.switch_state_to_writable(RegionState::Editing);
 
-        let _ = edit_result.sender.send(edit_result.result);
+        let _ = edit_result.sender.send(edit_result.result.map(|_| ()));
 
         if let Some(edit_queue) = self.region_edit_queues.get_mut(&edit_result.region_id) {
             if let Some(request) = edit_queue.dequeue() {
@@ -286,7 +291,7 @@ impl<S> RegionWorkerLoop<S> {
 }
 
 /// Checks the edit, writes and applies it.
-async fn edit_region(region: &MitoRegionRef, edit: RegionEdit) -> Result<()> {
+async fn edit_region(region: &MitoRegionRef, edit: RegionEdit) -> Result<ManifestVersion> {
     let region_id = region.region_id;
     info!("Applying {edit:?} to region {}", region_id);
 
