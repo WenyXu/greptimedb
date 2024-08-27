@@ -59,6 +59,7 @@ use crate::metrics::{REGION_COUNT, WRITE_STALL_TOTAL};
 use crate::region::{
     MitoRegionRef, OpeningRegions, OpeningRegionsRef, RegionMap, RegionMapRef, RegionState,
 };
+use crate::replicator::ReplicatorGroup;
 use crate::request::{
     BackgroundNotify, DdlRequest, SenderDdlRequest, SenderWriteRequest, WorkerRequest,
 };
@@ -175,6 +176,7 @@ impl WorkerGroup {
         );
         let time_provider = Arc::new(StdTimeProvider);
 
+        let replicator_group = ReplicatorGroup::new(log_store.clone());
         let workers = (0..config.num_workers)
             .map(|id| {
                 WorkerStarter {
@@ -193,6 +195,7 @@ impl WorkerGroup {
                     flush_sender: flush_sender.clone(),
                     flush_receiver: flush_receiver.clone(),
                     plugins: plugins.clone(),
+                    replicator_group: replicator_group.clone(),
                 }
                 .start()
             })
@@ -307,6 +310,7 @@ impl WorkerGroup {
                 .write_cache(write_cache)
                 .build(),
         );
+        let replicator_group = ReplicatorGroup::new(log_store.clone());
         let workers = (0..config.num_workers)
             .map(|id| {
                 WorkerStarter {
@@ -325,6 +329,7 @@ impl WorkerGroup {
                     flush_sender: flush_sender.clone(),
                     flush_receiver: flush_receiver.clone(),
                     plugins: Plugins::new(),
+                    replicator_group: replicator_group.clone(),
                 }
                 .start()
             })
@@ -399,6 +404,7 @@ struct WorkerStarter<S> {
     /// Watch channel receiver to wait for background flush job.
     flush_receiver: watch::Receiver<()>,
     plugins: Plugins,
+    replicator_group: ReplicatorGroup<S>,
 }
 
 impl<S: LogStore> WorkerStarter<S> {

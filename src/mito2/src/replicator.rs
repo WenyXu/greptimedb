@@ -31,9 +31,28 @@ use crate::wal::entry_reader::decode_stream;
 use crate::wal::raw_entry_reader::{stream_filter, stream_flatten};
 use crate::wal::EntryId;
 
+#[derive(Debug)]
 pub(crate) struct ReplicatorGroup<S> {
     replicators: Arc<Mutex<HashMap<Arc<KafkaProvider>, Sender<ReplicatorEvent>>>>,
     log_store: Arc<S>,
+}
+
+impl<S> Clone for ReplicatorGroup<S> {
+    fn clone(&self) -> Self {
+        Self {
+            replicators: self.replicators.clone(),
+            log_store: self.log_store.clone(),
+        }
+    }
+}
+
+impl<S: LogStore> ReplicatorGroup<S> {
+    pub fn new(log_store: Arc<S>) -> Self {
+        Self {
+            replicators: Default::default(),
+            log_store,
+        }
+    }
 }
 
 struct SubscribeRegion {
