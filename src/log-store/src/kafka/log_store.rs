@@ -201,11 +201,11 @@ impl LogStore for KafkaLogStore {
 
     /// Creates a new `EntryStream` to asynchronously generates `Entry` with entry ids.
     /// Returns entries belonging to `provider`, starting from `entry_id`.
-    async fn read_until<F: Fn(EntryId) -> bool + Send + 'static>(
+    async fn read_until<F: FnMut(EntryId) -> bool + Send + 'static>(
         &self,
         provider: &Provider,
         entry_id: EntryId,
-        condition: F,
+        mut condition: F,
     ) -> Result<SendableEntryStream<'static, Entry, Self::Error>> {
         let provider = provider
             .as_kafka_provider()
@@ -287,7 +287,7 @@ impl LogStore for KafkaLogStore {
 
                 // Ignores no-op records.
                 if kafka_record.value.is_none() {
-                    if check_termination_condition(offset, &condition) {
+                    if check_termination_condition(offset, &mut condition) {
                         if let Some(entries) = remaining_entries(&provider, &mut entry_records) {
                             yield Ok(entries);
                         }
@@ -306,7 +306,7 @@ impl LogStore for KafkaLogStore {
                     yield Ok(vec![entry]);
                 }
 
-                if check_termination_condition(offset, &condition) {
+                if check_termination_condition(offset, &mut condition) {
                     if let Some(entries) = remaining_entries(&provider, &mut entry_records) {
                         yield Ok(entries);
                     }
@@ -487,7 +487,7 @@ fn check_termination(offset: i64, end_offset: i64) -> bool {
     }
 }
 
-fn check_termination_condition<F: Fn(EntryId) -> bool>(offset: i64, condition: &F) -> bool {
+fn check_termination_condition<F: FnMut(EntryId) -> bool>(offset: i64, condition: &mut F) -> bool {
     // Terminates the stream if the entry with the end offset was read.
     if condition(offset as u64) {
         debug!("Stream consumer terminates at offset {}", offset);

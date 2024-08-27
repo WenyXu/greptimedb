@@ -42,7 +42,7 @@ pub trait LogStore: Send + Sync + 'static + std::fmt::Debug {
     /// while the value is the id of the last successfully written entry of the region.
     async fn append_batch(&self, entries: Vec<Entry>) -> Result<AppendBatchResponse, Self::Error>;
 
-    async fn read_until<F: Fn(EntryId) -> bool + Send + 'static>(
+    async fn read_until<F: FnMut(EntryId) -> bool + Send + 'static>(
         &self,
         _provider: &Provider,
         _id: EntryId,

@@ -22,12 +22,12 @@ use futures::StreamExt;
 use store_api::logstore::provider::{KafkaProvider, Provider};
 use store_api::logstore::LogStore;
 use store_api::storage::RegionId;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, Mutex};
 
 use crate::error::Result;
 use crate::request::WorkerRequest;
-use crate::wal::entry_reader::decode_stream;
+use crate::wal::entry_reader::{decode_raw_entry_with_region_id, decode_stream};
 use crate::wal::raw_entry_reader::{stream_filter, stream_flatten};
 use crate::wal::EntryId;
 
@@ -53,9 +53,29 @@ impl<S: LogStore> ReplicatorGroup<S> {
             log_store,
         }
     }
+
+    pub async fn get_or_insert(&self, provider: &Arc<KafkaProvider>) -> Sender<ReplicatorEvent> {
+        let mut replicators = self.replicators.lock().await;
+        match replicators.get(provider) {
+            Some(sender) => sender.clone(),
+            None => {
+                let (mut replicator, sender) =
+                    ReplicatorLoop::new(provider.clone(), self.log_store.clone()).await;
+
+                let moved_provider = provider.clone();
+                common_runtime::spawn_global(async move {
+                    replicator.run().await;
+                    info!("Replicator is exit, provider: {}", moved_provider.topic);
+                });
+                replicators.insert(provider.clone(), sender.clone());
+                sender
+            }
+        }
+    }
 }
 
-struct SubscribeRegion {
+#[derive(Debug)]
+pub struct SubscribeRegion {
     /// The [`RegionId`]
     region_id: RegionId,
     /// The last [`EntryId`] of the Region.
@@ -63,18 +83,39 @@ struct SubscribeRegion {
     /// Sends replication instructions to the Region.
     sender: Sender<WorkerRequest>,
     /// Sends the response of [`SubscribeRegion`].
-    resp_sender: Sender<Option<EntryId>>,
+    resp_sender: oneshot::Sender<Option<EntryId>>,
 }
 
-enum ReplicatorEvent {
+#[derive(Debug)]
+pub enum ReplicatorEvent {
     ReceivedEntry(Result<(RegionId, EntryId, WalEntry)>),
     SubscribeRegion(SubscribeRegion),
 }
 
+impl ReplicatorEvent {
+    pub fn new_subscribe_region(
+        region_id: RegionId,
+        last_entry_id: EntryId,
+        sender: Sender<WorkerRequest>,
+    ) -> (Self, oneshot::Receiver<Option<EntryId>>) {
+        let (tx, rx) = oneshot::channel();
+        (
+            Self::SubscribeRegion(SubscribeRegion {
+                region_id,
+                last_entry_id,
+                sender,
+                resp_sender: tx,
+            }),
+            rx,
+        )
+    }
+}
+
+#[derive(Debug)]
 struct ReplicatorLoop<S> {
     provider: Arc<KafkaProvider>,
     /// The sender notifies the upstream to exit.
-    exit_sender: oneshot::Sender<()>,
+    exit_sender: Option<oneshot::Sender<()>>,
     /// The high watermark.
     watermark: EntryId,
     /// All subscribers.
@@ -84,8 +125,62 @@ struct ReplicatorLoop<S> {
     log_store: Arc<S>,
 }
 
+impl<S> Drop for ReplicatorLoop<S> {
+    fn drop(&mut self) {
+        info!("dropping ReplicatorLoop");
+        let _ = self.exit_sender.take().unwrap().send(());
+    }
+}
+
+impl<S: LogStore> ReplicatorLoop<S> {
+    pub async fn new(
+        provider: Arc<KafkaProvider>,
+        log_store: Arc<S>,
+    ) -> (Self, Sender<ReplicatorEvent>) {
+        let (tx, rx) = channel(1024);
+
+        let moved_sender = tx.clone();
+        let moved_provider = Provider::Kafka(provider.clone());
+        let (exit_sender, mut exit_receiver) = oneshot::channel();
+        let moved_log_store = log_store.clone();
+
+        common_runtime::spawn_global(async move {
+            let mut stream = moved_log_store
+                .read_until(&moved_provider, 0, move |_| {
+                    exit_receiver.try_recv().is_ok()
+                })
+                .await
+                .unwrap();
+            while let Some(entries) = stream.next().await {
+                let entries = entries.unwrap();
+                info!("Replicating entries");
+                for entry in entries {
+                    let result = decode_raw_entry_with_region_id(entry);
+                    let _ = moved_sender
+                        .send(ReplicatorEvent::ReceivedEntry(result))
+                        .await;
+                }
+            }
+            info!("ReplicatorLoop consumer is exit!");
+        });
+
+        (
+            Self {
+                provider,
+                exit_sender: Some(exit_sender),
+                watermark: 0,
+                subscribers: HashMap::new(),
+                receiver: rx,
+                log_store,
+            },
+            tx,
+        )
+    }
+}
+
 const EVENT_BATCH_SIZE: usize = 128;
 
+#[derive(Debug)]
 enum Subscriber {
     Catching {
         region_id: RegionId,
@@ -187,7 +282,7 @@ impl<S: LogStore> ReplicatorLoop<S> {
         } in subscribe_regions
         {
             if self.subscribers.contains_key(&region_id) {
-                if resp_sender.send(None).await.is_err() {
+                if resp_sender.send(None).is_err() {
                     error!("SubscribeRegion receiver is dropped");
                 }
                 continue;
@@ -231,7 +326,7 @@ impl<S: LogStore> ReplicatorLoop<S> {
                     sender: Some(sender),
                 },
             );
-            if resp_sender.send(Some(watermark)).await.is_err() {
+            if resp_sender.send(Some(watermark)).is_err() {
                 error!("SubscribeRegion receiver is dropped");
             }
         }

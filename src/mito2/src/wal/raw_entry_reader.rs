@@ -24,7 +24,7 @@ use store_api::logstore::provider::Provider;
 use store_api::logstore::{LogStore, SendableEntryStream};
 use store_api::storage::RegionId;
 
-use crate::error::{self, Error, Result};
+use crate::error::{self, Result};
 use crate::wal::EntryId;
 
 /// A stream that yields [Entry].

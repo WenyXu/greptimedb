@@ -19,6 +19,7 @@ use std::sync::Arc;
 use common_telemetry::info;
 use object_store::util::join_path;
 use snafu::{OptionExt, ResultExt};
+use store_api::logstore::provider::Provider;
 use store_api::logstore::LogStore;
 use store_api::region_request::RegionOpenRequest;
 use store_api::storage::RegionId;
@@ -27,6 +28,7 @@ use crate::error::{
     ObjectStoreNotFoundSnafu, OpenDalSnafu, OpenRegionSnafu, RegionNotFoundSnafu, Result,
 };
 use crate::region::opener::RegionOpener;
+use crate::replicator::ReplicatorEvent;
 use crate::request::OptionOutputTx;
 use crate::wal::entry_distributor::WalEntryReceiver;
 use crate::worker::handle_drop::remove_region_dir_once;
@@ -117,12 +119,17 @@ impl<S: LogStore> RegionWorkerLoop<S> {
         let region_count = self.region_count.clone();
         let worker_id = self.id;
         opening_regions.insert_sender(region_id, sender);
+        let replicator_group = self.replicator_group.clone();
+        let sender = self.sender.clone();
         common_runtime::spawn_global(async move {
             match opener.open(&config, &wal).await {
                 Ok(region) => {
                     info!("Region {} is opened, worker: {}", region_id, worker_id);
                     region_count.inc();
 
+                    let provider = region.provider.clone();
+                    let last_entry_id = region.version_control.current().last_entry_id;
+                    let region_id = region.region_id;
                     // Insert the Region into the RegionMap.
                     regions.insert_region(Arc::new(region));
 
@@ -130,6 +137,16 @@ impl<S: LogStore> RegionWorkerLoop<S> {
                     for sender in senders {
                         sender.send(Ok(0));
                     }
+                    if let Provider::Kafka(provider) = provider {
+                        info!("Registering region: {region_id} replication");
+                        let replicator_sender = replicator_group.get_or_insert(&provider).await;
+                        let (req, resp_recv) =
+                            ReplicatorEvent::new_subscribe_region(region_id, last_entry_id, sender);
+                        let _ = replicator_sender.send(req).await;
+                        if let Ok(Some(id)) = resp_recv.await {
+                            info!("Registered region to replicator, resp: {id}");
+                        };
+                    };
                 }
                 Err(err) => {
                     let senders = opening_regions.remove_sender(region_id);

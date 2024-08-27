@@ -455,6 +455,7 @@ impl<S: LogStore> WorkerStarter<S> {
             stalled_count: WRITE_STALL_TOTAL.with_label_values(&[&id_string]),
             region_count: REGION_COUNT.with_label_values(&[&id_string]),
             region_edit_queues: RegionEditQueues::default(),
+            replicator_group: self.replicator_group,
         };
         let handle = common_runtime::spawn_global(async move {
             worker_thread.run().await;
@@ -645,6 +646,7 @@ struct RegionWorkerLoop<S> {
     region_count: IntGauge,
     /// Queues for region edit requests.
     region_edit_queues: RegionEditQueues,
+    replicator_group: ReplicatorGroup<S>,
 }
 
 impl<S: LogStore> RegionWorkerLoop<S> {

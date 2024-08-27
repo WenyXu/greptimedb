@@ -20,6 +20,7 @@ use prost::Message;
 use snafu::{ensure, ResultExt};
 use store_api::logstore::entry::Entry;
 use store_api::logstore::provider::Provider;
+use store_api::storage::RegionId;
 
 use super::raw_entry_reader::EntryStream;
 use crate::error::{CorruptedEntrySnafu, DecodeWalSnafu, Result};
@@ -33,6 +34,17 @@ pub(crate) fn decode_raw_entry(raw_entry: Entry) -> Result<(EntryId, WalEntry)> 
     let buffer = into_buffer(raw_entry);
     let wal_entry = WalEntry::decode(buffer).context(DecodeWalSnafu { region_id })?;
     Ok((entry_id, wal_entry))
+}
+
+pub(crate) fn decode_raw_entry_with_region_id(
+    raw_entry: Entry,
+) -> Result<(RegionId, EntryId, WalEntry)> {
+    let entry_id = raw_entry.entry_id();
+    let region_id = raw_entry.region_id();
+    ensure!(raw_entry.is_complete(), CorruptedEntrySnafu { region_id });
+    let buffer = into_buffer(raw_entry);
+    let wal_entry = WalEntry::decode(buffer).context(DecodeWalSnafu { region_id })?;
+    Ok((region_id, entry_id, wal_entry))
 }
 
 fn into_buffer(raw_entry: Entry) -> Buffer {
