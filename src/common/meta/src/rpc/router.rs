@@ -62,6 +62,14 @@ pub fn find_leaders(region_routes: &[RegionRoute]) -> HashSet<Peer> {
         .collect()
 }
 
+pub fn find_followers(region_routes: &[RegionRoute]) -> HashSet<Peer> {
+    region_routes
+        .iter()
+        .flat_map(|x| &x.follower_peers)
+        .cloned()
+        .collect()
+}
+
 /// Returns the operating leader regions with corresponding [DatanodeId].
 pub fn operating_leader_regions(region_routes: &[RegionRoute]) -> Vec<(RegionId, DatanodeId)> {
     region_routes
@@ -141,6 +149,18 @@ pub fn find_leader_regions(region_routes: &[RegionRoute], datanode: &Peer) -> Ve
                 if peer == datanode {
                     return Some(x.region.id.region_number());
                 }
+            }
+            None
+        })
+        .collect()
+}
+
+pub fn find_follower_regions(region_routes: &[RegionRoute], datanode: &Peer) -> Vec<RegionNumber> {
+    region_routes
+        .iter()
+        .filter_map(|x| {
+            if x.follower_peers.iter().any(|peer| *peer == *datanode) {
+                return Some(x.region.id.region_number());
             }
             None
         })

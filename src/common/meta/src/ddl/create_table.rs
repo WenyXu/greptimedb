@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use api::v1::region::region_request::Body as PbRegionRequest;
-use api::v1::region::{RegionRequest, RegionRequestHeader};
+use api::v1::region::{OpenRequest, RegionRequest, RegionRequestHeader};
 use async_trait::async_trait;
 use common_error::ext::BoxedError;
 use common_procedure::error::{
@@ -45,8 +45,10 @@ use crate::lock_key::{CatalogLock, SchemaLock, TableNameLock};
 use crate::region_keeper::OperatingRegionGuard;
 use crate::rpc::ddl::CreateTableTask;
 use crate::rpc::router::{
-    find_leader_regions, find_leaders, operating_leader_regions, RegionRoute,
+    find_follower_regions, find_followers, find_leader_regions, find_leaders,
+    operating_leader_regions, RegionRoute,
 };
+use crate::wal_options_allocator::prepare_wal_options;
 use crate::{metrics, ClusterId};
 pub struct CreateTableProcedure {
     pub context: DdlContext,
@@ -252,6 +254,53 @@ impl CreateTableProcedure {
         }
 
         join_all(create_region_tasks)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
+
+        // Create followers
+        let followers = find_followers(region_routes);
+        let mut open_region_tasks = Vec::with_capacity(followers.len());
+        for datanode in followers {
+            let requester = self.context.node_manager.datanode(&datanode).await;
+
+            let regions = find_follower_regions(region_routes, &datanode);
+            let mut requests = Vec::with_capacity(regions.len());
+            for region_number in regions {
+                let region_id = RegionId::new(self.table_id(), region_number);
+
+                let mut options = self.creator.data.task.create_table.table_options.clone();
+                prepare_wal_options(&mut options, region_id, region_wal_options);
+
+                requests.push(PbRegionRequest::Open(OpenRequest {
+                    region_id: region_id.as_u64(),
+                    engine: self.creator.data.task.table_info.meta.engine.to_string(),
+                    path: storage_path.clone(),
+                    options: options.clone(),
+                }));
+            }
+
+            for request in requests {
+                let request = RegionRequest {
+                    header: Some(RegionRequestHeader {
+                        tracing_context: TracingContext::from_current_span().to_w3c(),
+                        ..Default::default()
+                    }),
+                    body: Some(request),
+                };
+
+                let datanode = datanode.clone();
+                let requester = requester.clone();
+                open_region_tasks.push(async move {
+                    requester
+                        .handle(request)
+                        .await
+                        .map_err(add_peer_context_if_needed(datanode))
+                });
+            }
+        }
+
+        join_all(open_region_tasks)
             .await
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
