@@ -1,0 +1,13 @@
+2024-08-29T08:00:50.776263Z  INFO mito2::request: has null: [false, false, false, true, false, true], idx: 0, name: id1
+2024-08-29T08:00:50.776308Z  INFO mito2::request: has null: [false, false, false, true, false, true], idx: 1, name: id2
+2024-08-29T08:00:50.776333Z  INFO mito2::request: has null: [false, false, false, true, false, true], idx: 2, name: type
+2024-08-29T08:00:50.776358Z  INFO mito2::request: has null: [false, false, false, true, false, true], idx: 3, name: log
+2024-08-29T08:00:50.776384Z  INFO mito2::request: has null: [false, false, false, true, false, true], idx: 4, name: logger
+2024-08-29T08:00:50.776410Z  INFO mito2::request: has null: [false, false, false, true, false, true], idx: 5, name: time
+
+2024-08-29T08:13:56.713953Z  INFO mito2::request: has null: [false, false, false, false, false, false], idx: 0, name: id1
+2024-08-29T08:13:56.714054Z  INFO mito2::request: has null: [false, false, false, false, false, false], idx: 1, name: id2
+2024-08-29T08:13:56.714120Z  INFO mito2::request: has null: [false, false, false, false, false, false], idx: 2, name: type
+2024-08-29T08:13:56.714180Z  INFO mito2::request: has null: [false, false, false, false, false, false], idx: 3, name: log
+2024-08-29T08:13:56.714253Z  INFO mito2::request: has null: [false, false, false, false, false, false], idx: 4, name: logger
+2024-08-29T08:13:56.714316Z  INFO mito2::request: has null: [false, false, false, false, false, false], idx: 5, name: time
