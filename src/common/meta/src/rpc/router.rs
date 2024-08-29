@@ -141,6 +141,16 @@ pub fn find_region_leader(
         .cloned()
 }
 
+pub fn find_region_followers(
+    region_routes: &[RegionRoute],
+    region_number: RegionNumber,
+) -> Option<Vec<Peer>> {
+    region_routes
+        .iter()
+        .find(|x| x.region.id.region_number() == region_number)
+        .map(|r| r.follower_peers.clone())
+}
+
 pub fn find_leader_regions(region_routes: &[RegionRoute], datanode: &Peer) -> Vec<RegionNumber> {
     region_routes
         .iter()

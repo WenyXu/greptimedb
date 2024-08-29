@@ -271,6 +271,17 @@ impl PartitionRuleManager {
         )
     }
 
+    pub async fn find_region_followers(&self, region_id: RegionId) -> Result<Vec<Peer>> {
+        let region_routes = &self
+            .find_physical_table_route(region_id.table_id())
+            .await?
+            .region_routes;
+
+        let regions = router::find_region_followers(region_routes, region_id.region_number())
+            .unwrap_or_default();
+        Ok(regions)
+    }
+
     pub async fn split_rows(
         &self,
         table_id: TableId,

@@ -70,6 +70,12 @@ impl CurrentRegionManifest {
         self.version
     }
 
+    /// Returns the new [`ManifestVersion`].
+    pub fn inc_version(&mut self) -> ManifestVersion {
+        self.version += 1;
+        self.version
+    }
+
     pub fn open(
         manifest_dir: &str,
         mut manifest_builder: RegionManifestBuilder,
@@ -362,7 +368,7 @@ impl RegionManifestManager {
             }
         );
 
-        let version = self.current.version() + 1;
+        let version = self.current.inc_version();
         self.store.save(version, &action_list.encode()?).await?;
         let version = self.current.apply(version, action_list)?;
         self.checkpointer

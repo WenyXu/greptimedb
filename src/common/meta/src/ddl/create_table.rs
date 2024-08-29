@@ -218,6 +218,7 @@ impl CreateTableProcedure {
         let leaders = find_leaders(region_routes);
         let mut create_region_tasks = Vec::with_capacity(leaders.len());
 
+        info!("leaders: {leaders:?}");
         for datanode in leaders {
             let requester = self.context.node_manager.datanode(&datanode).await;
 
@@ -261,6 +262,7 @@ impl CreateTableProcedure {
         // Create followers
         let followers = find_followers(region_routes);
         let mut open_region_tasks = Vec::with_capacity(followers.len());
+        info!("followers: {followers:?}");
         for datanode in followers {
             let requester = self.context.node_manager.datanode(&datanode).await;
 

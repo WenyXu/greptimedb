@@ -219,7 +219,7 @@ impl Subscriber {
 
                 let (request, receiver) =
                     WorkerRequest::new_region_replication_request(*region_id, entry_id, wal_entry);
-                if sender.send(request).await.is_err() {
+                if sender.send(request).await.is_ok() {
                     Self::handle_response(*region_id, receiver).await;
                     *self = Subscriber::Replicating {
                         region_id: *region_id,
@@ -240,7 +240,7 @@ impl Subscriber {
                 }
                 let (request, receiver) =
                     WorkerRequest::new_region_replication_request(*region_id, entry_id, wal_entry);
-                if sender.send(request).await.is_err() {
+                if sender.send(request).await.is_ok() {
                     *watermark = entry_id;
                     Self::handle_response(*region_id, receiver).await;
                 } else {
@@ -309,7 +309,7 @@ impl<S: LogStore> ReplicatorLoop<S> {
                     let (request, receiver) = WorkerRequest::new_region_replication_request(
                         region_id, entry_id, wal_entry,
                     );
-                    if moved_sender.send(request).await.is_err() {
+                    if moved_sender.send(request).await.is_ok() {
                         let r = receiver.await.unwrap();
                         debug!("Catching up region: {region_id}, result: {:?}", r);
                     } else {

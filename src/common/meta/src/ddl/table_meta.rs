@@ -129,7 +129,10 @@ impl TableMetadataAllocator {
             .get("region_replicas")
             .map(|replicas| replicas.parse::<u64>().unwrap());
 
-        let peers = self.peer_allocator.alloc(ctx, regions).await?;
+        let peers = self
+            .peer_allocator
+            .alloc(ctx, regions + replicas.unwrap_or_default() as usize)
+            .await?;
         let region_routes = task
             .partitions
             .iter()
@@ -146,7 +149,7 @@ impl TableMetadataAllocator {
                 let follower_peers = replicas
                     .map(|replicas| {
                         (0..replicas)
-                            .map(|idx| peers[(i + idx as usize) % peers.len()].clone())
+                            .map(|idx| peers[(i + 1 + idx as usize) % peers.len()].clone())
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();

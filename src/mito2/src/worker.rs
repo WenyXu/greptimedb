@@ -854,14 +854,17 @@ impl<S: LogStore> RegionWorkerLoop<S> {
         action_list: RegionMetaActionList,
     ) -> Result<()> {
         ensure!(
-            region.is_writable(),
+            !region.is_readonly(),
             RegionStateSnafu {
                 region_id: region.region_id,
                 state: region.state(),
                 expect: RegionState::Writable,
             }
         );
-
+        info!(
+            "Recording manifest actions: {}, region: {}",
+            next_version, region.region_id
+        );
         let mut recorder = ManifestActionRecorder::new(
             region.region_id,
             &region.version_control,
@@ -870,6 +873,7 @@ impl<S: LogStore> RegionWorkerLoop<S> {
         recorder.push_action_list(next_version, action_list)?;
         let mut writer = self.wal.writer();
         recorder.add_wal_entry(&mut writer)?;
+        writer.write_to_wal().await?;
         recorder.finish();
         Ok(())
     }

@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use common_telemetry::info;
+
+use crate::manifest::action::{RegionEditReason, RegionMetaAction, RegionMetaActionList};
 use crate::region_write_ctx::RegionWriteCtx;
 use crate::request::{OptionOutputTx, SenderReplicationRequest};
 use crate::worker::RegionWorkerLoop;
@@ -38,6 +41,46 @@ impl<S> RegionWorkerLoop<S> {
         let mut rows_replayed = 0;
 
         for mutation in wal_entry.mutations {
+            if let Some(action_list) = mutation.action_list {
+                let api::v1::manifest_action_list::Data::Json(data) = action_list.data.unwrap();
+                let action_list = RegionMetaActionList::decode(data.as_bytes()).unwrap();
+                for action in action_list.actions {
+                    match action {
+                        RegionMetaAction::Change(change) => {
+                            info!("apply region change");
+                            region
+                                .version_control
+                                .alter_schema(change.metadata, &region.memtable_builder);
+                        }
+                        RegionMetaAction::Edit(edit) => {
+                            info!("apply region edit");
+                            let version = region.version_control.current();
+                            let memtables = if matches!(edit.reason, RegionEditReason::Flush) {
+                                version
+                                    .version
+                                    .memtables
+                                    .immutables()
+                                    .iter()
+                                    .map(|mem| mem.id())
+                                    .collect::<Vec<_>>()
+                            } else {
+                                vec![]
+                            };
+                            region.version_control.apply_edit(
+                                edit,
+                                &memtables,
+                                region.file_purger.clone(),
+                            );
+                        }
+                        RegionMetaAction::Remove(_) => {
+                            // Nothing todo
+                        }
+                        RegionMetaAction::Truncate(_) => {
+                            todo!()
+                        }
+                    }
+                }
+            };
             rows_replayed += mutation
                 .rows
                 .as_ref()

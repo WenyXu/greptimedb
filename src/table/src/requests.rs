@@ -40,6 +40,8 @@ pub const FILE_TABLE_LOCATION_KEY: &str = "location";
 pub const FILE_TABLE_PATTERN_KEY: &str = "pattern";
 pub const FILE_TABLE_FORMAT_KEY: &str = "format";
 
+pub const REGION_REPLICAS: &str = "region_replicas";
+
 /// Returns true if the `key` is a valid key for any engine or storage.
 pub fn validate_table_option(key: &str) -> bool {
     if is_supported_in_s3(key) {
@@ -63,6 +65,7 @@ pub fn validate_table_option(key: &str) -> bool {
         // metric engine keys:
         PHYSICAL_TABLE_METADATA_KEY,
         LOGICAL_TABLE_METADATA_KEY,
+        REGION_REPLICAS,
     ]
     .contains(&key)
 }

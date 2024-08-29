@@ -19,6 +19,7 @@ use common_error::ext::BoxedError;
 use common_meta::node_manager::NodeManagerRef;
 use common_query::request::QueryRequest;
 use common_recordbatch::SendableRecordBatchStream;
+use common_telemetry::tracing::info;
 use partition::manager::PartitionRuleManagerRef;
 use query::error::{RegionQuerySnafu, Result as QueryResult};
 use query::region_query::RegionQueryHandler;
@@ -56,6 +57,20 @@ impl RegionQueryHandler for FrontendRegionQueryHandler {
 impl FrontendRegionQueryHandler {
     async fn do_get_inner(&self, request: QueryRequest) -> Result<SendableRecordBatchStream> {
         let region_id = request.region_id;
+
+        let peers = self
+            .partition_manager
+            .find_region_followers(region_id)
+            .await
+            .unwrap();
+        if !peers.is_empty() {
+            info!("Query from follower: {:?}", peers[0]);
+            let client = self.node_manager.datanode(&peers[0]).await;
+            return client
+                .handle_query(request)
+                .await
+                .context(RequestQuerySnafu);
+        }
 
         let peer = &self
             .partition_manager
