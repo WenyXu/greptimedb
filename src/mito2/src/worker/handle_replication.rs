@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use common_telemetry::info;
+use common_telemetry::{error, info};
 
 use crate::manifest::action::{RegionEditReason, RegionMetaAction, RegionMetaActionList};
 use crate::region_write_ctx::RegionWriteCtx;
@@ -54,9 +54,14 @@ impl<S> RegionWorkerLoop<S> {
                         }
                         RegionMetaAction::Edit(edit) => {
                             info!("apply region edit");
-                            let version = region.version_control.current();
-                            let memtables = if matches!(edit.reason, RegionEditReason::Flush) {
-                                version
+                            let is_flush = matches!(edit.reason, RegionEditReason::Flush);
+                            let memtables = if is_flush {
+                                if let Err(e) = region.version_control.freeze_mutable() {
+                                    error!(e; "Failed to freeze the mutable memtable");
+                                }
+                                region
+                                    .version_control
+                                    .current()
                                     .version
                                     .memtables
                                     .immutables()
