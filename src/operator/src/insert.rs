@@ -21,9 +21,12 @@ use api::v1::{
     AlterExpr, ColumnDataType, ColumnSchema, CreateTableExpr, InsertRequests, RowInsertRequest,
     RowInsertRequests, SemanticType,
 };
+use backon::{ExponentialBuilder, Retryable};
 use catalog::CatalogManagerRef;
 use client::{OutputData, OutputMeta};
 use common_catalog::consts::default_engine;
+use common_error::ext::ErrorExt;
+use common_error::status_code::StatusCode;
 use common_grpc_expr::util::{extract_new_columns, ColumnExpr};
 use common_meta::cache::TableFlownodeSetCacheRef;
 use common_meta::node_manager::{AffectedRows, NodeManagerRef};
@@ -325,10 +328,10 @@ impl Inserter {
                 let node_manager = self.node_manager.clone();
                 let request = request_factory.build_insert(inserts);
                 common_runtime::spawn_global(async move {
-                    node_manager
-                        .datanode(&peer)
-                        .await
-                        .handle(request)
+                    let datanode = node_manager.datanode(&peer).await;
+                    (|| async { datanode.handle(request.clone()).await })
+                        .retry(ExponentialBuilder::default())
+                        .when(|e| matches!(e.status_code(), StatusCode::RegionNotReady))
                         .await
                         .context(RequestInsertsSnafu)
                 })

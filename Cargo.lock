@@ -7569,6 +7569,7 @@ version = "0.9.5"
 dependencies = [
  "api",
  "async-trait",
+ "backon 1.2.0",
  "catalog",
  "chrono",
  "client",

@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 api.workspace = true
 async-trait = "0.1"
+backon.workspace = true
 catalog.workspace = true
 chrono.workspace = true
 client.workspace = true
