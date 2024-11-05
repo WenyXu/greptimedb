@@ -16,6 +16,7 @@ use std::any::Any;
 
 use common_catalog::format_full_table_name;
 use common_procedure::Status;
+use common_telemetry::info;
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use snafu::OptionExt;
@@ -72,7 +73,7 @@ impl DropDatabaseCursor {
         match (self.target, table_route_value) {
             (DropTableTarget::Logical, TableRouteValue::Logical(route)) => {
                 let physical_table_id = route.physical_table_id();
-
+                info!("Drop database: fetching physical table route for drop database");
                 let (_, table_route) = ddl_ctx
                     .table_metadata_manager
                     .table_route_manager()
@@ -150,6 +151,7 @@ impl State for DropDatabaseCursor {
         ctx: &mut DropDatabaseContext,
     ) -> Result<(Box<dyn State>, Status)> {
         if ctx.tables.as_deref().is_none() {
+            info!("Drop database: fetching tables for drop database");
             let tables = ddl_ctx
                 .table_metadata_manager
                 .table_name_manager()
@@ -161,6 +163,7 @@ impl State for DropDatabaseCursor {
             Some((table_name, table_name_value)) => {
                 let table_id = table_name_value.table_id();
 
+                info!("Drop database: fetching table info for drop database");
                 let table_info_value = ddl_ctx
                     .table_metadata_manager
                     .table_info_manager()

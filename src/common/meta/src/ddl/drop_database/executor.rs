@@ -99,6 +99,7 @@ impl State for DropDatabaseExecutor {
         ctx: &mut DropDatabaseContext,
     ) -> Result<(Box<dyn State>, Status)> {
         self.register_dropping_regions(ddl_ctx)?;
+        info!("Drop database: drop table metadata: {}", self.table_name);
         let executor =
             DropTableExecutor::new(ctx.cluster_id, self.table_name.clone(), self.table_id, true);
         // Deletes metadata for table permanently.
@@ -111,6 +112,7 @@ impl State for DropDatabaseExecutor {
             .on_destroy_metadata(ddl_ctx, &table_route_value)
             .await?;
         executor.invalidate_table_cache(ddl_ctx).await?;
+        info!("Drop database: drop regions: {}", self.table_name);
         executor
             .on_drop_regions(ddl_ctx, &self.physical_region_routes)
             .await?;
