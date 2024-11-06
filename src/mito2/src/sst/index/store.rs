@@ -274,7 +274,14 @@ impl RangeReader for InstrumentedRangeReader<'_> {
     }
 
     async fn read(&mut self, range: Range<u64>) -> io::Result<Bytes> {
-        let buf = self.store.reader(&self.path).await?.read(range).await?;
+        let buf = self
+            .store
+            .reader_with(&self.path)
+            .concurrent(8)
+            .chunk(8 * 1024 * 1024)
+            .await?
+            .read(range)
+            .await?;
         self.read_byte_count.inc_by(buf.len() as _);
         self.read_count.inc_by(1);
         Ok(buf.to_bytes())
@@ -295,7 +302,9 @@ impl RangeReader for InstrumentedRangeReader<'_> {
     async fn read_vec(&mut self, ranges: &[Range<u64>]) -> io::Result<Vec<Bytes>> {
         let bufs = self
             .store
-            .reader(&self.path)
+            .reader_with(&self.path)
+            .concurrent(8)
+            .gap(512 * 1024)
             .await?
             .fetch(ranges.to_owned())
             .await?;
