@@ -11632,6 +11632,7 @@ dependencies = [
  "common-macro",
  "common-meta",
  "common-recordbatch",
+ "common-telemetry",
  "common-time",
  "common-wal",
  "datafusion-expr",

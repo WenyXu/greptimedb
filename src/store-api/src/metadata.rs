@@ -27,6 +27,7 @@ use api::v1::SemanticType;
 use common_error::ext::ErrorExt;
 use common_error::status_code::StatusCode;
 use common_macro::stack_trace_debug;
+use common_telemetry::info;
 use datatypes::arrow::datatypes::FieldRef;
 use datatypes::schema::{ColumnSchema, Schema, SchemaRef};
 use serde::de::Error;
@@ -333,6 +334,16 @@ impl RegionMetadata {
 
             // Check whether column id is duplicated. We already check column name
             // is unique in `Schema` so we only check column id here.
+            if id_names.contains_key(&col.column_id) {
+                info!(
+                    "The column {} and {} have the same column id {}, region_id: {}, schema: {:?}",
+                    id_names[&col.column_id],
+                    col.column_schema.name,
+                    col.column_id,
+                    self.region_id,
+                    self.schema,
+                );
+            }
             ensure!(
                 !id_names.contains_key(&col.column_id),
                 InvalidMetaSnafu {
