@@ -216,6 +216,13 @@ lazy_static! {
     // ------- End of cache metrics.
 
     // Index metrics.
+    /// Timer of index read.
+    pub static ref FETCH_INDEX_ELAPSED: HistogramVec = register_histogram_vec!(
+        "greptime_fetch_index_elapsed",
+        "index fetch index elapsed",
+        &[TYPE_LABEL],
+    )
+    .unwrap();
     /// Timer of index application.
     pub static ref INDEX_APPLY_ELAPSED: HistogramVec = register_histogram_vec!(
         "greptime_index_apply_elapsed",

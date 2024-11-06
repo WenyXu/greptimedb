@@ -22,7 +22,7 @@ use snafu::ResultExt;
 use store_api::storage::ColumnId;
 
 use crate::error::{ApplyFulltextIndexSnafu, PuffinBuildReaderSnafu, PuffinReadBlobSnafu, Result};
-use crate::metrics::INDEX_APPLY_ELAPSED;
+use crate::metrics::{FETCH_INDEX_ELAPSED, INDEX_APPLY_ELAPSED};
 use crate::sst::file::FileId;
 use crate::sst::index::fulltext_index::INDEX_BLOB_TYPE;
 use crate::sst::index::puffin_manager::{PuffinManagerFactory, SstPuffinDir};
@@ -74,7 +74,13 @@ impl FulltextIndexApplier {
         let mut row_ids = BTreeSet::new();
 
         for (column_id, query) in &self.queries {
-            let dir = self.index_dir_path(file_id, *column_id).await?;
+            let dir = {
+                let _timer = FETCH_INDEX_ELAPSED
+                    .with_label_values(&[TYPE_FULLTEXT_INDEX])
+                    .start_timer();
+                self.index_dir_path(file_id, *column_id).await?
+            };
+
             let path = match &dir {
                 Some(dir) => dir.path(),
                 None => {
