@@ -16,10 +16,11 @@
 //!
 //! We only support partitioning the tree by pre-defined internal columns.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use ahash::{HashMap, HashMapExt};
 use api::v1::SemanticType;
 use common_recordbatch::filter::SimpleFilterEvaluator;
 use store_api::metadata::RegionMetadataRef;

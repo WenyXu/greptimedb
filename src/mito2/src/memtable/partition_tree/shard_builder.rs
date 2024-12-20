@@ -14,10 +14,10 @@
 
 //! Builder of a shard.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ahash::HashMap;
 use store_api::metadata::RegionMetadataRef;
 
 use crate::error::Result;
@@ -315,6 +315,8 @@ impl Drop for ShardBuilderReader {
 
 #[cfg(test)]
 mod tests {
+
+    use ahash::HashMapExt;
 
     use super::*;
     use crate::memtable::partition_tree::data::timestamp_array_to_i64_slice;
