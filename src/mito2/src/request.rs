@@ -14,7 +14,6 @@
 
 //! Worker requests.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -26,6 +25,7 @@ use api::v1::column_def::options_from_column_schema;
 use api::v1::{ColumnDataType, ColumnSchema, OpType, Rows, SemanticType, Value};
 use common_telemetry::{info, tracing};
 use datatypes::prelude::DataType;
+use hashbrown::HashMap;
 use prometheus::HistogramTimer;
 use prost::Message;
 use smallvec::SmallVec;

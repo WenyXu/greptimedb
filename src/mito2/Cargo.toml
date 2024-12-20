@@ -41,6 +41,7 @@ datafusion-expr.workspace = true
 datatypes.workspace = true
 dotenv.workspace = true
 futures.workspace = true
+hashbrown = "0.15"
 humantime-serde.workspace = true
 index.workspace = true
 itertools.workspace = true

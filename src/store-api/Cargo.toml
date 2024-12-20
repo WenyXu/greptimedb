@@ -22,6 +22,7 @@ datafusion-physical-plan.workspace = true
 datatypes.workspace = true
 derive_builder.workspace = true
 futures.workspace = true
+hashbrown = "0.15"
 humantime.workspace = true
 prost.workspace = true
 serde.workspace = true
