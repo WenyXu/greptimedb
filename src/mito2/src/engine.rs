@@ -68,7 +68,7 @@ use common_base::Plugins;
 use common_error::ext::BoxedError;
 use common_meta::key::SchemaMetadataManagerRef;
 use common_recordbatch::SendableRecordBatchStream;
-use common_telemetry::tracing;
+use common_telemetry::tracing::{self};
 use common_wal::options::{WalOptions, WAL_OPTIONS_KEY};
 use futures::future::{join_all, try_join_all};
 use object_store::manager::ObjectStoreManagerRef;
@@ -401,6 +401,7 @@ impl EngineInner {
     }
 
     /// Handles [RegionRequest] and return its executed result.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     async fn handle_request(
         &self,
         region_id: RegionId,

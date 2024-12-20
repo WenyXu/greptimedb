@@ -24,7 +24,7 @@ use api::helper::{
 };
 use api::v1::column_def::options_from_column_schema;
 use api::v1::{ColumnDataType, ColumnSchema, OpType, Rows, SemanticType, Value};
-use common_telemetry::info;
+use common_telemetry::{info, tracing};
 use datatypes::prelude::DataType;
 use prometheus::HistogramTimer;
 use prost::Message;
@@ -230,6 +230,7 @@ impl WriteRequest {
     ///
     /// Currently, our protobuf format might be inefficient when we need to fill lots of null
     /// values.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     pub(crate) fn fill_missing_columns(&mut self, metadata: &RegionMetadata) -> Result<()> {
         debug_assert_eq!(self.region_id, metadata.region_id);
 
@@ -243,6 +244,7 @@ impl WriteRequest {
     }
 
     /// Fills default value for specific `column`.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     fn fill_column(&mut self, column: &ColumnMetadata) -> Result<()> {
         // Need to add a default value for this column.
         let proto_value = self.column_default_value(column)?;

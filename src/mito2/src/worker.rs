@@ -34,7 +34,7 @@ use std::time::Duration;
 use common_base::Plugins;
 use common_meta::key::SchemaMetadataManagerRef;
 use common_runtime::JoinHandle;
-use common_telemetry::{error, info, warn};
+use common_telemetry::{error, info, tracing, warn};
 use futures::future::try_join_all;
 use object_store::manager::ObjectStoreManagerRef;
 use prometheus::IntGauge;
@@ -767,6 +767,7 @@ impl<S: LogStore> RegionWorkerLoop<S> {
     /// Dispatches and processes requests.
     ///
     /// `buffer` should be empty.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     async fn handle_requests(&mut self, buffer: &mut RequestBuffer) {
         let mut write_requests = Vec::with_capacity(buffer.len());
         let mut ddl_requests = Vec::with_capacity(buffer.len());

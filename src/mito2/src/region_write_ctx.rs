@@ -16,6 +16,7 @@ use std::mem;
 use std::sync::Arc;
 
 use api::v1::{Mutation, OpType, Rows, WalEntry};
+use common_telemetry::tracing;
 use snafu::ResultExt;
 use store_api::logstore::provider::Provider;
 use store_api::logstore::LogStore;
@@ -190,6 +191,7 @@ impl RegionWriteCtx {
     }
 
     /// Consumes mutations and writes them into mutable memtable.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     pub(crate) fn write_memtable(&mut self) {
         debug_assert_eq!(self.notifiers.len(), self.wal_entry.mutations.len());
 

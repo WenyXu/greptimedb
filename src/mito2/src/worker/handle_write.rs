@@ -18,7 +18,7 @@ use std::collections::{hash_map, HashMap};
 use std::sync::Arc;
 
 use api::v1::OpType;
-use common_telemetry::debug;
+use common_telemetry::{debug, tracing};
 use snafu::ensure;
 use store_api::logstore::LogStore;
 use store_api::metadata::RegionMetadata;
@@ -33,6 +33,7 @@ use crate::worker::RegionWorkerLoop;
 
 impl<S: LogStore> RegionWorkerLoop<S> {
     /// Takes and handles all write requests.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     pub(crate) async fn handle_write_requests(
         &mut self,
         mut write_requests: Vec<SenderWriteRequest>,
@@ -157,6 +158,7 @@ impl<S: LogStore> RegionWorkerLoop<S> {
 
 impl<S> RegionWorkerLoop<S> {
     /// Validates and groups requests by region.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     fn prepare_region_write_ctx(
         &mut self,
         write_requests: Vec<SenderWriteRequest>,
@@ -240,6 +242,7 @@ impl<S> RegionWorkerLoop<S> {
                 continue;
             }
 
+            debug!("push rows: {}", sender_req.request.rows.rows.len());
             // Collect requests by region.
             region_ctx.push_mutation(
                 sender_req.request.op_type as i32,
@@ -274,6 +277,7 @@ fn reject_write_requests(write_requests: Vec<SenderWriteRequest>) {
 }
 
 /// Checks the schema and fill missing columns.
+#[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
 fn maybe_fill_missing_columns(request: &mut WriteRequest, metadata: &RegionMetadata) -> Result<()> {
     if let Err(e) = request.check_schema(metadata) {
         if e.is_fill_default() {
