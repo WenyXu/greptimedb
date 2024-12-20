@@ -21,6 +21,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
+use ahash::{HashMap, HashMapExt};
 use api::v1::column_def::try_as_column_schema;
 use api::v1::region::RegionColumnDef;
 use api::v1::SemanticType;
@@ -29,7 +30,6 @@ use common_error::status_code::StatusCode;
 use common_macro::stack_trace_debug;
 use datatypes::arrow::datatypes::FieldRef;
 use datatypes::schema::{ColumnSchema, FulltextOptions, Schema, SchemaRef};
-use hashbrown::HashMap;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize};
 use snafu::{ensure, Location, OptionExt, ResultExt, Snafu};

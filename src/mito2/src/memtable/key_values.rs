@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use ahash::HashMap;
 use api::v1::{ColumnSchema, Mutation, OpType, Row, Rows};
 use datatypes::value::ValueRef;
-use hashbrown::HashMap;
 use store_api::metadata::RegionMetadata;
 use store_api::storage::SequenceNumber;
 

@@ -17,6 +17,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use ahash::{HashMap, HashMapExt};
 use api::helper::{
     is_column_type_value_eq, is_semantic_type_eq, proto_value_type, to_proto_value,
     ColumnDataTypeWrapper,
@@ -25,7 +26,6 @@ use api::v1::column_def::options_from_column_schema;
 use api::v1::{ColumnDataType, ColumnSchema, OpType, Rows, SemanticType, Value};
 use common_telemetry::{info, tracing};
 use datatypes::prelude::DataType;
-use hashbrown::HashMap;
 use prometheus::HistogramTimer;
 use prost::Message;
 use smallvec::SmallVec;
