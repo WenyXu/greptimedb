@@ -18,8 +18,8 @@
 
 use std::any::Any;
 use std::collections::HashSet;
-use std::fmt;
 use std::sync::Arc;
+use std::{default, fmt};
 
 use ahash::{HashMap, HashMapExt};
 use api::v1::column_def::try_as_column_schema;
@@ -95,6 +95,15 @@ impl ColumnMetadata {
     }
 }
 
+#[derive(Clone, Default, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PrimaryKeyEncodeFormat {
+    /// Encodes all primary key columns.
+    #[default]
+    Full,
+    /// Encodes only exsiting primary key columns.
+    Sparse,
+}
+
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// General static metadata of a region.
 ///
@@ -137,6 +146,9 @@ pub struct RegionMetadata {
     #[serde(skip)]
     name_to_column_idx: HashMap<String, ColumnId>,
 
+    /// Encode primary key.
+    pub primary_key_encode: PrimaryKeyEncodeFormat,
+    
     /// Columns in the region. Has the same order as columns
     /// in [schema](RegionMetadata::schema).
     pub column_metadatas: Vec<ColumnMetadata>,
@@ -177,6 +189,8 @@ impl<'de> Deserialize<'de> for RegionMetadata {
             primary_key: Vec<ColumnId>,
             region_id: RegionId,
             schema_version: u64,
+            #[serde(default)]
+            primary_key_encode: PrimaryKeyEncodeFormat,
         }
 
         let without_schema = RegionMetadataWithoutSchema::deserialize(deserializer)?;
@@ -192,6 +206,7 @@ impl<'de> Deserialize<'de> for RegionMetadata {
             primary_key: without_schema.primary_key,
             region_id: without_schema.region_id,
             schema_version: without_schema.schema_version,
+            primary_key_encode: without_schema.primary_key_encode,
         })
     }
 }
@@ -333,6 +348,7 @@ impl RegionMetadata {
             primary_key: projected_primary_key,
             region_id: self.region_id,
             schema_version: self.schema_version,
+            primary_key_encode: self.primary_key_encode,
         })
     }
 
@@ -517,6 +533,7 @@ pub struct RegionMetadataBuilder {
     column_metadatas: Vec<ColumnMetadata>,
     primary_key: Vec<ColumnId>,
     schema_version: u64,
+    primary_key_encode: PrimaryKeyEncodeFormat,
 }
 
 impl RegionMetadataBuilder {
@@ -527,6 +544,7 @@ impl RegionMetadataBuilder {
             column_metadatas: vec![],
             primary_key: vec![],
             schema_version: 0,
+            primary_key_encode: PrimaryKeyEncodeFormat::Full,
         }
     }
 
@@ -537,6 +555,7 @@ impl RegionMetadataBuilder {
             primary_key: existing.primary_key,
             region_id: existing.region_id,
             schema_version: existing.schema_version,
+            primary_key_encode: existing.primary_key_encode,
         }
     }
 
@@ -549,6 +568,12 @@ impl RegionMetadataBuilder {
     /// Sets the primary key of the region.
     pub fn primary_key(&mut self, key: Vec<ColumnId>) -> &mut Self {
         self.primary_key = key;
+        self
+    }
+
+    /// Sets the primary key encode.
+    pub fn primary_key_encode(&mut self, encode: PrimaryKeyEncodeFormat) -> &mut Self {
+        self.primary_key_encode = encode;
         self
     }
 
@@ -596,6 +621,7 @@ impl RegionMetadataBuilder {
             primary_key: self.primary_key,
             region_id: self.region_id,
             schema_version: self.schema_version,
+            primary_key_encode: self.primary_key_encode,
         };
 
         meta.validate()?;
