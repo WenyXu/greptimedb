@@ -133,6 +133,9 @@ pub struct RegionMetadata {
     /// Map column id to column's index in [column_metadatas](RegionMetadata::column_metadatas).
     #[serde(skip)]
     id_to_index: HashMap<ColumnId, usize>,
+    /// Map column name to column's index in [column_metadatas](RegionMetadata::column_metadatas).
+    #[serde(skip)]
+    name_to_column_idx: HashMap<String, ColumnId>,
 
     /// Columns in the region. Has the same order as columns
     /// in [schema](RegionMetadata::schema).
@@ -184,6 +187,7 @@ impl<'de> Deserialize<'de> for RegionMetadata {
             schema: skipped.schema,
             time_index: skipped.time_index,
             id_to_index: skipped.id_to_index,
+            name_to_column_idx: skipped.name_to_column_idx,
             column_metadatas: without_schema.column_metadatas,
             primary_key: without_schema.primary_key,
             region_id: without_schema.region_id,
@@ -220,6 +224,11 @@ impl RegionMetadata {
         self.column_metadatas
             .iter()
             .position(|col| col.column_schema.name == column_name)
+    }
+
+    /// Find column id by name.
+    pub fn column_id_by_name(&self, column_name: &str) -> Option<ColumnId> {
+        self.name_to_column_idx.get(column_name).copied()
     }
 
     /// Returns the time index column
@@ -304,12 +313,14 @@ impl RegionMetadata {
         let mut projected_column_metadatas = Vec::with_capacity(indices_to_preserve.len());
         let mut projected_primary_key = vec![];
         let mut projected_id_to_index = HashMap::with_capacity(indices_to_preserve.len());
+        let mut projected_name_to_column_idx = HashMap::with_capacity(indices_to_preserve.len());
         for index in indices_to_preserve {
             let col = self.column_metadatas[index].clone();
             if col.semantic_type == SemanticType::Tag {
                 projected_primary_key.push(col.column_id);
             }
             projected_id_to_index.insert(col.column_id, projected_column_metadatas.len());
+            projected_name_to_column_idx.insert(col.column_schema.name.clone(), col.column_id);
             projected_column_metadatas.push(col);
         }
 
@@ -317,6 +328,7 @@ impl RegionMetadata {
             schema: Arc::new(projected_schema),
             time_index: self.time_index,
             id_to_index: projected_id_to_index,
+            name_to_column_idx: projected_name_to_column_idx,
             column_metadatas: projected_column_metadatas,
             primary_key: projected_primary_key,
             region_id: self.region_id,
@@ -579,6 +591,7 @@ impl RegionMetadataBuilder {
             schema: skipped.schema,
             time_index: skipped.time_index,
             id_to_index: skipped.id_to_index,
+            name_to_column_idx: skipped.name_to_column_idx,
             column_metadatas: self.column_metadatas,
             primary_key: self.primary_key,
             region_id: self.region_id,
@@ -726,6 +739,8 @@ struct SkippedFields {
     time_index: ColumnId,
     /// Map column id to column's index in [column_metadatas](RegionMetadata::column_metadatas).
     id_to_index: HashMap<ColumnId, usize>,
+    /// Map column name to column's index in [column_metadatas](RegionMetadata::column_metadatas).
+    name_to_column_idx: HashMap<String, ColumnId>,
 }
 
 impl SkippedFields {
@@ -754,10 +769,16 @@ impl SkippedFields {
             .map(|(idx, col)| (col.column_id, idx))
             .collect();
 
+        let name_to_column_idx = column_metadatas
+            .iter()
+            .map(|col| (col.column_schema.name.clone(), col.column_id))
+            .collect();
+
         Ok(SkippedFields {
             schema,
             time_index,
             id_to_index,
+            name_to_column_idx,
         })
     }
 }

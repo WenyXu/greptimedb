@@ -73,15 +73,8 @@ impl RegionInvoker {
 #[async_trait]
 impl Datanode for RegionInvoker {
     async fn handle(&self, request: RegionRequest) -> MetaResult<RegionResponse> {
-        let span = request
-            .header
-            .as_ref()
-            .map(|h| TracingContext::from_w3c(&h.tracing_context))
-            .unwrap_or_default()
-            .attach(tracing::info_span!("RegionInvoker::handle_region_request"));
         let response = self
             .handle_inner(request)
-            .trace(span)
             .await
             .map_err(BoxedError::new)
             .context(meta_error::ExternalSnafu)?;

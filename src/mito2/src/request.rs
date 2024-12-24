@@ -246,6 +246,10 @@ impl WriteRequest {
     /// Fills default value for specific `column`.
     #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     fn fill_column(&mut self, column: &ColumnMetadata) -> Result<()> {
+        if column.column_schema.is_nullable() {
+            return Ok(());
+        }
+
         // Need to add a default value for this column.
         let proto_value = self.column_default_value(column)?;
 

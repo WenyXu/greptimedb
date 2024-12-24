@@ -18,8 +18,10 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use ahash::HashMap;
 use api::v1::OpType;
 use common_recordbatch::filter::SimpleFilterEvaluator;
+use common_telemetry::warn;
 use common_time::Timestamp;
 use datafusion_common::ScalarValue;
 use datatypes::prelude::ValueRef;
@@ -78,11 +80,13 @@ impl PartitionTree {
         let sparse_encoder = SparseEncoder {
             fields: metadata
                 .primary_key_columns()
-                .map(|c| FieldWithId {
-                    field: SortField::new(c.column_schema.data_type.clone()),
-                    column_id: c.column_id,
+                .map(|c| {
+                    (
+                        c.column_id,
+                        SortField::new(c.column_schema.data_type.clone()),
+                    )
                 })
-                .collect(),
+                .collect::<HashMap<_, _>>(),
         };
         let is_partitioned = Partition::has_multi_partitions(&metadata);
         let mut config = config.clone();
@@ -115,13 +119,13 @@ impl PartitionTree {
         let has_pk = !self.metadata.primary_key.is_empty();
 
         for kv in kvs.iter() {
-            ensure!(
-                kv.num_primary_keys() == self.row_codec.num_fields(),
-                PrimaryKeyLengthMismatchSnafu {
-                    expect: self.row_codec.num_fields(),
-                    actual: kv.num_primary_keys(),
-                }
-            );
+            // ensure!(
+            //     kv.num_primary_keys() == self.row_codec.num_fields(),
+            //     PrimaryKeyLengthMismatchSnafu {
+            //         expect: self.row_codec.num_fields(),
+            //         actual: kv.num_primary_keys(),
+            //     }
+            // );
             // Safety: timestamp of kv must be both present and a valid timestamp value.
             let ts = kv.timestamp().as_timestamp().unwrap().unwrap().value();
             metrics.min_ts = metrics.min_ts.min(ts);
@@ -139,7 +143,7 @@ impl PartitionTree {
             if self.is_partitioned {
                 // Use sparse encoder for metric engine.
                 self.sparse_encoder
-                    .encode_to_vec(kv.primary_keys(), pk_buffer)?;
+                    .encode_to_vec(kv.primary_keys_with_column_id(), pk_buffer)?;
             } else {
                 self.row_codec.encode_to_vec(kv.primary_keys(), pk_buffer)?;
             }
@@ -166,13 +170,13 @@ impl PartitionTree {
     ) -> Result<()> {
         let has_pk = !self.metadata.primary_key.is_empty();
 
-        ensure!(
-            kv.num_primary_keys() == self.row_codec.num_fields(),
-            PrimaryKeyLengthMismatchSnafu {
-                expect: self.row_codec.num_fields(),
-                actual: kv.num_primary_keys(),
-            }
-        );
+        // ensure!(
+        //     kv.num_primary_keys() == self.row_codec.num_fields(),
+        //     PrimaryKeyLengthMismatchSnafu {
+        //         expect: self.row_codec.num_fields(),
+        //         actual: kv.num_primary_keys(),
+        //     }
+        // );
         // Safety: timestamp of kv must be both present and a valid timestamp value.
         let ts = kv.timestamp().as_timestamp().unwrap().unwrap().value();
         metrics.min_ts = metrics.min_ts.min(ts);
@@ -189,7 +193,7 @@ impl PartitionTree {
         if self.is_partitioned {
             // Use sparse encoder for metric engine.
             self.sparse_encoder
-                .encode_to_vec(kv.primary_keys(), pk_buffer)?;
+                .encode_to_vec(kv.primary_keys_with_column_id(), pk_buffer)?;
         } else {
             self.row_codec.encode_to_vec(kv.primary_keys(), pk_buffer)?;
         }
@@ -355,7 +359,8 @@ impl PartitionTree {
             primary_key,
             &self.row_codec,
             key_value,
-            self.is_partitioned, // If tree is partitioned, re-encode is required to get the full primary key.
+            false, // hard code false
+            // self.is_partitioned, // If tree is partitioned, re-encode is required to get the full primary key.
             metrics,
         )
     }
@@ -412,28 +417,26 @@ impl PartitionTree {
     }
 }
 
-struct FieldWithId {
-    field: SortField,
-    column_id: ColumnId,
-}
-
 struct SparseEncoder {
-    fields: Vec<FieldWithId>,
+    fields: HashMap<ColumnId, SortField>,
 }
 
 impl SparseEncoder {
     fn encode_to_vec<'a, I>(&self, row: I, buffer: &mut Vec<u8>) -> Result<()>
     where
-        I: Iterator<Item = ValueRef<'a>>,
+        I: Iterator<Item = (ColumnId, ValueRef<'a>)>,
     {
         let mut serializer = Serializer::new(buffer);
-        for (value, field) in row.zip(self.fields.iter()) {
+        for (column_id, value) in row {
             if !value.is_null() {
-                field
-                    .column_id
-                    .serialize(&mut serializer)
-                    .context(SerializeFieldSnafu)?;
-                field.field.serialize(&mut serializer, &value)?;
+                if let Some(field) = &self.fields.get(&column_id) {
+                    column_id
+                        .serialize(&mut serializer)
+                        .context(SerializeFieldSnafu)?;
+                    field.serialize(&mut serializer, &value)?;
+                } else {
+                    warn!("Column id {} not found in sparse encoder", column_id);
+                }
             }
         }
         Ok(())

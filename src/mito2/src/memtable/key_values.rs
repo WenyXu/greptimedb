@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use ahash::HashMap;
-use api::v1::{ColumnSchema, Mutation, OpType, Row, Rows};
+use api::v1::{ColumnDataType, ColumnSchema, Mutation, OpType, Row, Rows, SemanticType};
 use datatypes::value::ValueRef;
 use store_api::metadata::RegionMetadata;
-use store_api::storage::SequenceNumber;
+use store_api::storage::{ColumnId, SequenceNumber};
 
 /// Key value view of a mutation.
 #[derive(Debug)]
@@ -127,15 +127,29 @@ pub struct KeyValue<'a> {
 
 impl KeyValue<'_> {
     /// Get primary key columns.
+    pub fn primary_keys_with_column_id(&self) -> impl Iterator<Item = (ColumnId, ValueRef)> {
+        self.helper.indices[..self.helper.num_primary_key_column]
+            .iter()
+            .map(|idx| {
+                (
+                    idx.column_id,
+                    api::helper::pb_value_to_value_ref(
+                        &self.row.values[idx.sparse_column_idx],
+                        &self.schema[idx.sparse_column_idx].datatype_extension,
+                    ),
+                )
+            })
+    }
+
+    /// Get primary key columns.
     pub fn primary_keys(&self) -> impl Iterator<Item = ValueRef> {
         self.helper.indices[..self.helper.num_primary_key_column]
             .iter()
-            .map(|idx| match idx {
-                Some(i) => api::helper::pb_value_to_value_ref(
-                    &self.row.values[*i],
-                    &self.schema[*i].datatype_extension,
-                ),
-                None => ValueRef::Null,
+            .map(|idx| {
+                api::helper::pb_value_to_value_ref(
+                    &self.row.values[idx.sparse_column_idx],
+                    &self.schema[idx.sparse_column_idx].datatype_extension,
+                )
             })
     }
 
@@ -143,22 +157,21 @@ impl KeyValue<'_> {
     pub fn fields(&self) -> impl Iterator<Item = ValueRef> {
         self.helper.indices[self.helper.num_primary_key_column + 1..]
             .iter()
-            .map(|idx| match idx {
-                Some(i) => api::helper::pb_value_to_value_ref(
-                    &self.row.values[*i],
-                    &self.schema[*i].datatype_extension,
-                ),
-                None => ValueRef::Null,
+            .map(|idx| {
+                api::helper::pb_value_to_value_ref(
+                    &self.row.values[idx.sparse_column_idx],
+                    &self.schema[idx.sparse_column_idx].datatype_extension,
+                )
             })
     }
 
     /// Get timestamp.
     pub fn timestamp(&self) -> ValueRef {
         // Timestamp is primitive, we clone it.
-        let index = self.helper.indices[self.helper.num_primary_key_column].unwrap();
+        let index = &self.helper.indices[self.helper.num_primary_key_column];
         api::helper::pb_value_to_value_ref(
-            &self.row.values[index],
-            &self.schema[index].datatype_extension,
+            &self.row.values[index.sparse_column_idx],
+            &self.schema[index.sparse_column_idx].datatype_extension,
         )
     }
 
@@ -183,6 +196,12 @@ impl KeyValue<'_> {
     }
 }
 
+#[derive(Debug)]
+struct ColumnIndex {
+    sparse_column_idx: usize,
+    column_id: ColumnId,
+}
+
 /// Helper to read rows in key, value order for sparse data.
 #[derive(Debug)]
 struct SparseReadRowHelper {
@@ -190,7 +209,7 @@ struct SparseReadRowHelper {
     ///
     /// `indices[..num_primary_key_column]` are primary key columns, `indices[num_primary_key_column]`
     /// is the timestamp column and remainings are field columns.
-    indices: Vec<Option<usize>>,
+    indices: Vec<ColumnIndex>,
     /// Number of primary key columns.
     num_primary_key_column: usize,
 }
@@ -208,32 +227,58 @@ impl SparseReadRowHelper {
             .enumerate()
             .map(|(index, col)| (&col.column_name, index))
             .collect();
-        let mut indices = Vec::with_capacity(metadata.column_metadatas.len());
+        let mut indices = Vec::with_capacity(rows.schema.len());
+        let mut num_primary_key_column = 0;
+
+        // for (idx, col) in rows.schema.iter().enumerate() {
+        //     if col.semantic_type() == SemanticType::Tag {
+        //         let column_id = metadata.column_id_by_name(&col.column_name).unwrap();
+        //         indices.push(ColumnIndex {
+        //             sparse_column_idx: idx,
+        //             column_id,
+        //         });
+        //         num_primary_key_column += 1;
+        //     }
+        // }
 
         // Get primary key indices.
         for pk_column_id in &metadata.primary_key {
             // Safety: Id comes from primary key.
             let column = metadata.column_by_id(*pk_column_id).unwrap();
             let index = name_to_index.get(&column.column_schema.name);
-            indices.push(index.copied());
+            if let Some(index) = index {
+                indices.push(ColumnIndex {
+                    sparse_column_idx: *index,
+                    column_id: *pk_column_id,
+                });
+                num_primary_key_column += 1;
+            }
         }
+
         // Get timestamp index.
         // Safety: time index must exist
         let ts_index = name_to_index
             .get(&metadata.time_index_column().column_schema.name)
             .unwrap();
-        indices.push(Some(*ts_index));
+        indices.push(ColumnIndex {
+            sparse_column_idx: *ts_index,
+            column_id: metadata.time_index_column().column_id,
+        });
 
         // Iterate columns and find field columns.
         for column in metadata.field_columns() {
             // Get index in request for each field column.
-            let index = name_to_index.get(&column.column_schema.name);
-            indices.push(index.copied());
+            if let Some(index) = name_to_index.get(&column.column_schema.name) {
+                indices.push(ColumnIndex {
+                    sparse_column_idx: *index,
+                    column_id: column.column_id,
+                });
+            }
         }
 
         SparseReadRowHelper {
             indices,
-            num_primary_key_column: metadata.primary_key.len(),
+            num_primary_key_column,
         }
     }
 }

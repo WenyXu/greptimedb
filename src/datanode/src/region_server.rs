@@ -149,7 +149,6 @@ impl RegionServer {
             .await
     }
 
-    #[tracing::instrument(skip_all, fields(request_type = request.request_type()))]
     pub async fn handle_request(
         &self,
         region_id: RegionId,
