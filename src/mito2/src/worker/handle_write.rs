@@ -278,7 +278,10 @@ fn reject_write_requests(write_requests: Vec<SenderWriteRequest>) {
 
 /// Checks the schema and fill missing columns.
 #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
-fn maybe_fill_missing_columns(request: &mut WriteRequest, metadata: &RegionMetadata) -> Result<()> {
+fn maybe_fill_missing_columns(
+    _request: &mut WriteRequest,
+    _metadata: &RegionMetadata,
+) -> Result<()> {
     // if let Err(e) = request.check_schema(metadata) {
     //     if e.is_fill_default() {
     //         // TODO(yingwen): Add metrics for this case.

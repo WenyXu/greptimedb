@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use store_api::metadata::RegionMetadataRef;
 
+use super::partition::SparsePrimaryKeyFilter;
 use crate::error::Result;
 use crate::memtable::key_values::KeyValue;
 use crate::memtable::partition_tree::data::{
@@ -26,7 +27,6 @@ use crate::memtable::partition_tree::data::{
 };
 use crate::memtable::partition_tree::dict::KeyDictRef;
 use crate::memtable::partition_tree::merger::{Merger, Node};
-use crate::memtable::partition_tree::partition::PrimaryKeyFilter;
 use crate::memtable::partition_tree::shard_builder::ShardBuilderReader;
 use crate::memtable::partition_tree::{PkId, PkIndex, ShardId};
 use crate::metrics::PARTITION_TREE_READ_STAGE_ELAPSED;
@@ -146,7 +146,7 @@ pub struct ShardReaderBuilder {
 }
 
 impl ShardReaderBuilder {
-    pub(crate) fn build(self, key_filter: Option<PrimaryKeyFilter>) -> Result<ShardReader> {
+    pub(crate) fn build(self, key_filter: Option<SparsePrimaryKeyFilter>) -> Result<ShardReader> {
         let ShardReaderBuilder {
             shard_id,
             key_dict,
@@ -163,7 +163,7 @@ pub struct ShardReader {
     shard_id: ShardId,
     key_dict: Option<KeyDictRef>,
     parts_reader: DataPartsReader,
-    key_filter: Option<PrimaryKeyFilter>,
+    key_filter: Option<SparsePrimaryKeyFilter>,
     last_yield_pk_index: Option<PkIndex>,
     keys_before_pruning: usize,
     keys_after_pruning: usize,
@@ -176,7 +176,7 @@ impl ShardReader {
         shard_id: ShardId,
         key_dict: Option<KeyDictRef>,
         parts_reader: DataPartsReader,
-        key_filter: Option<PrimaryKeyFilter>,
+        key_filter: Option<SparsePrimaryKeyFilter>,
         data_build_cost: Duration,
     ) -> Result<Self> {
         let has_pk = key_dict.is_some();

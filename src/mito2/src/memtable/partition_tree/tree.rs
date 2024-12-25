@@ -27,12 +27,12 @@ use datafusion_common::ScalarValue;
 use datatypes::prelude::ValueRef;
 use memcomparable::Serializer;
 use serde::Serialize;
-use snafu::{ensure, ResultExt};
+use snafu::ResultExt;
 use store_api::metadata::RegionMetadataRef;
 use store_api::storage::ColumnId;
 use table::predicate::Predicate;
 
-use crate::error::{PrimaryKeyLengthMismatchSnafu, Result, SerializeFieldSnafu};
+use crate::error::{Result, SerializeFieldSnafu};
 use crate::flush::WriteBufferManagerRef;
 use crate::memtable::key_values::KeyValue;
 use crate::memtable::partition_tree::partition::{
@@ -241,6 +241,7 @@ impl PartitionTree {
         let context = ReadPartitionContext::new(
             self.metadata.clone(),
             self.row_codec.clone(),
+            self.sparse_encoder.clone(),
             projection,
             filters,
         );
@@ -417,8 +418,8 @@ impl PartitionTree {
     }
 }
 
-struct SparseEncoder {
-    fields: HashMap<ColumnId, SortField>,
+pub(crate) struct SparseEncoder {
+    pub(crate) fields: HashMap<ColumnId, SortField>,
 }
 
 impl SparseEncoder {

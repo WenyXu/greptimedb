@@ -23,10 +23,14 @@ use std::time::{Duration, Instant};
 use ahash::{HashMap, HashMapExt};
 use api::v1::SemanticType;
 use common_recordbatch::filter::SimpleFilterEvaluator;
+use datatypes::value::Value;
+use memcomparable::Deserializer;
+use serde::Deserialize;
 use store_api::metadata::RegionMetadataRef;
 use store_api::metric_engine_consts::DATA_SCHEMA_TABLE_ID_COLUMN_NAME;
 use store_api::storage::ColumnId;
 
+use super::tree::SparseEncoder;
 use crate::error::Result;
 use crate::memtable::key_values::KeyValue;
 use crate::memtable::partition_tree::data::{DataBatch, DataParts, DATA_INIT_CAP};
@@ -130,11 +134,12 @@ impl Partition {
     /// Scans data in the partition.
     pub fn read(&self, mut context: ReadPartitionContext) -> Result<PartitionReader> {
         let start = Instant::now();
+
         let key_filter = if context.need_prune_key {
-            Some(PrimaryKeyFilter::new(
+            Some(SparsePrimaryKeyFilter::new(
                 context.metadata.clone(),
                 context.filters.clone(),
-                context.row_codec.clone(),
+                context.sparse_encoder.clone(),
             ))
         } else {
             None
@@ -355,6 +360,129 @@ impl PartitionReader {
     }
 }
 
+struct SparsePrimaryKeyDecoder {
+    codec: Arc<SparseEncoder>,
+}
+
+impl SparsePrimaryKeyDecoder {
+    pub(crate) fn new(codec: Arc<SparseEncoder>) -> Self {
+        Self { codec }
+    }
+
+    /// Returns the index of the column in the primary key if the column exists.
+    pub(crate) fn has_column(
+        &self,
+        pk: &[u8],
+        offsets_map: &mut HashMap<u32, usize>,
+        column_id: ColumnId,
+    ) -> Option<usize> {
+        let mut deserializer = Deserializer::new(pk);
+
+        if offsets_map.is_empty() {
+            let mut offset = 0;
+            while deserializer.has_remaining() {
+                let column_id = Option::<u32>::deserialize(&mut deserializer)
+                    .unwrap()
+                    .unwrap();
+                offset += 5;
+                offsets_map.insert(column_id, offset);
+                let field = self.codec.fields.get(&column_id).unwrap();
+                let skip = field.skip_deserialize(pk, &mut deserializer).unwrap();
+                offset += skip;
+            }
+
+            offsets_map.get(&column_id).copied()
+        } else {
+            offsets_map.get(&column_id).copied()
+        }
+    }
+
+    /// Decode value at `offset` in `pk`.
+    pub(crate) fn decode_value_at(
+        &self,
+        pk: &[u8],
+        offset: usize,
+        column_id: ColumnId,
+    ) -> Result<Value> {
+        let mut deserializer = Deserializer::new(pk);
+        deserializer.advance(offset);
+        let field = self.codec.fields.get(&column_id).unwrap();
+        field.deserialize(&mut deserializer)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SparsePrimaryKeyFilter {
+    metadata: RegionMetadataRef,
+    filters: Arc<Vec<SimpleFilterEvaluator>>,
+    codec: Arc<SparsePrimaryKeyDecoder>,
+    offsets_map: HashMap<u32, usize>,
+}
+
+impl SparsePrimaryKeyFilter {
+    pub(crate) fn new(
+        metadata: RegionMetadataRef,
+        filters: Arc<Vec<SimpleFilterEvaluator>>,
+        codec: Arc<SparseEncoder>,
+    ) -> Self {
+        Self {
+            metadata,
+            filters,
+            codec: Arc::new(SparsePrimaryKeyDecoder::new(codec)),
+            offsets_map: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn prune_primary_key(&mut self, pk: &[u8]) -> bool {
+        if self.filters.is_empty() {
+            return true;
+        }
+
+        // no primary key, we simply return true.
+        if self.metadata.primary_key.is_empty() {
+            return true;
+        }
+
+        // evaluate filters against primary key values
+        let mut result = true;
+        self.offsets_map.clear();
+        for filter in &*self.filters {
+            if Partition::is_partition_column(filter.column_name()) {
+                continue;
+            }
+            let Some(column) = self.metadata.column_by_name(filter.column_name()) else {
+                continue;
+            };
+            // ignore filters that are not referencing primary key columns
+            if column.semantic_type != SemanticType::Tag {
+                continue;
+            }
+
+            let Some(offset) = self
+                .codec
+                .has_column(pk, &mut self.offsets_map, column.column_id)
+            else {
+                continue;
+            };
+
+            let value = match self.codec.decode_value_at(pk, offset, column.column_id) {
+                Ok(v) => v,
+                Err(e) => {
+                    common_telemetry::error!(e; "Failed to decode primary key");
+                    return true;
+                }
+            };
+
+            let scalar_value = value
+                .try_to_scalar_value(&column.column_schema.data_type)
+                .unwrap();
+            result &= filter.evaluate_scalar(&scalar_value).unwrap_or(true);
+        }
+
+        result
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct PrimaryKeyFilter {
     metadata: RegionMetadataRef,
@@ -430,6 +558,7 @@ impl PrimaryKeyFilter {
 pub(crate) struct ReadPartitionContext {
     metadata: RegionMetadataRef,
     row_codec: Arc<McmpRowCodec>,
+    sparse_encoder: Arc<SparseEncoder>,
     projection: HashSet<ColumnId>,
     filters: Arc<Vec<SimpleFilterEvaluator>>,
     /// Buffer to store pk weights.
@@ -469,6 +598,7 @@ impl ReadPartitionContext {
     pub(crate) fn new(
         metadata: RegionMetadataRef,
         row_codec: Arc<McmpRowCodec>,
+        sparse_encoder: Arc<SparseEncoder>,
         projection: HashSet<ColumnId>,
         filters: Vec<SimpleFilterEvaluator>,
     ) -> ReadPartitionContext {
@@ -476,6 +606,7 @@ impl ReadPartitionContext {
         ReadPartitionContext {
             metadata,
             row_codec,
+            sparse_encoder,
             projection,
             filters: Arc::new(filters),
             pk_weights: Vec::new(),

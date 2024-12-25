@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use ahash::HashMap;
-use api::v1::{ColumnDataType, ColumnSchema, Mutation, OpType, Row, Rows, SemanticType};
+use api::v1::{ColumnSchema, Mutation, OpType, Row, Rows};
 use datatypes::value::ValueRef;
 use store_api::metadata::RegionMetadata;
 use store_api::storage::{ColumnId, SequenceNumber};

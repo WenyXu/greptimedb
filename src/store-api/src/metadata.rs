@@ -18,8 +18,8 @@
 
 use std::any::Any;
 use std::collections::HashSet;
+use std::fmt;
 use std::sync::Arc;
-use std::{default, fmt};
 
 use ahash::{HashMap, HashMapExt};
 use api::v1::column_def::try_as_column_schema;
@@ -148,7 +148,7 @@ pub struct RegionMetadata {
 
     /// Encode primary key.
     pub primary_key_encode: PrimaryKeyEncodeFormat,
-    
+
     /// Columns in the region. Has the same order as columns
     /// in [schema](RegionMetadata::schema).
     pub column_metadatas: Vec<ColumnMetadata>,
