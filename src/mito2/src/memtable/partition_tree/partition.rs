@@ -360,7 +360,8 @@ impl PartitionReader {
     }
 }
 
-struct SparsePrimaryKeyDecoder {
+#[derive(Debug)]
+pub struct SparsePrimaryKeyDecoder {
     codec: Arc<SparseEncoder>,
 }
 
@@ -376,17 +377,17 @@ impl SparsePrimaryKeyDecoder {
         offsets_map: &mut HashMap<u32, usize>,
         column_id: ColumnId,
     ) -> Option<usize> {
-        let mut deserializer = Deserializer::new(pk);
-
         if offsets_map.is_empty() {
+            let mut deserializer = Deserializer::new(pk);
             let mut offset = 0;
             while deserializer.has_remaining() {
-                let column_id = Option::<u32>::deserialize(&mut deserializer)
-                    .unwrap()
-                    .unwrap();
-                offset += 5;
+                let column_id = u32::deserialize(&mut deserializer).unwrap();
+                offset += 4;
                 offsets_map.insert(column_id, offset);
-                let field = self.codec.fields.get(&column_id).unwrap();
+                let Some(field) = self.codec.fields.get(&column_id) else {
+                    break;
+                };
+
                 let skip = field.skip_deserialize(pk, &mut deserializer).unwrap();
                 offset += skip;
             }
@@ -458,25 +459,28 @@ impl SparsePrimaryKeyFilter {
                 continue;
             }
 
-            let Some(offset) = self
+            if let Some(offset) = self
                 .codec
                 .has_column(pk, &mut self.offsets_map, column.column_id)
-            else {
-                continue;
-            };
+            {
+                let value = match self.codec.decode_value_at(pk, offset, column.column_id) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        common_telemetry::error!(e; "Failed to decode primary key");
+                        return true;
+                    }
+                };
 
-            let value = match self.codec.decode_value_at(pk, offset, column.column_id) {
-                Ok(v) => v,
-                Err(e) => {
-                    common_telemetry::error!(e; "Failed to decode primary key");
-                    return true;
-                }
-            };
-
-            let scalar_value = value
-                .try_to_scalar_value(&column.column_schema.data_type)
-                .unwrap();
-            result &= filter.evaluate_scalar(&scalar_value).unwrap_or(true);
+                let scalar_value = value
+                    .try_to_scalar_value(&column.column_schema.data_type)
+                    .unwrap();
+                result &= filter.evaluate_scalar(&scalar_value).unwrap_or(true);
+            } else {
+                let scalar_value = Value::Null
+                    .try_to_scalar_value(&column.column_schema.data_type)
+                    .unwrap();
+                result &= filter.evaluate_scalar(&scalar_value).unwrap_or(true);
+            }
         }
 
         result
@@ -751,5 +755,118 @@ impl Inner {
             self.shards.push(shard);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use ahash::{HashMap, HashMapExt};
+    use datatypes::prelude::ConcreteDataType;
+    use datatypes::value::ValueRef;
+    use memcomparable::Serializer;
+    use serde::Serialize;
+
+    use crate::memtable::partition_tree::partition::SparsePrimaryKeyDecoder;
+    use crate::memtable::partition_tree::tree::SparseEncoder;
+    use crate::row_converter::{McmpRowCodec, RowCodec, SortField};
+
+    #[test]
+    fn test_sparse_primary_key_decoder_1() {
+        common_telemetry::init_default_ut_logging();
+        let mut pk = vec![
+            0, 0, 0, 11, 1, 1, 109, 111, 110, 105, 116, 111, 114, 105, 9, 110, 103, 47, 112, 114,
+            111, 109, 101, 9, 116, 104, 101, 117, 115, 45, 107, 117, 9, 98, 101, 45, 112, 114, 111,
+            109, 101, 9, 116, 104, 101, 117, 115, 45, 112, 114, 9, 111, 109, 101, 116, 104, 101,
+            117, 115, 8, 0, 0, 0, 12, 1, 1, 112, 114, 111, 109, 101, 116, 104, 101, 9, 117, 115,
+            45, 112, 114, 111, 109, 101, 9, 116, 104, 101, 117, 115, 45, 107, 117, 9, 98, 101, 45,
+            112, 114, 111, 109, 101, 9, 116, 104, 101, 117, 115, 45, 112, 114, 9, 111, 109, 101,
+            116, 104, 101, 117, 115, 9, 45, 48, 0, 0, 0, 0, 0, 0, 2, 128, 0, 0, 4, 1, 0, 0, 49, 41,
+            128, 0, 0, 3, 1, 22, 41, 133, 163, 194, 103, 179, 0, 0, 0, 0, 2, 1, 1, 101, 107, 115,
+            45, 97, 112, 45, 115, 9, 111, 117, 116, 104, 101, 97, 115, 116, 9, 45, 49, 45, 113, 97,
+            49, 0, 0, 6, 0, 0, 0, 3, 1, 1, 101, 116, 99, 100, 0, 0, 0, 0, 4, 0, 0, 0, 4, 1, 1, 99,
+            108, 105, 101, 110, 116, 0, 0, 6, 0, 0, 0, 5, 1, 1, 113, 97, 0, 0, 0, 0, 0, 0, 2, 0, 0,
+            0, 6, 1, 1, 102, 97, 108, 115, 101, 0, 0, 0, 5, 0, 0, 0, 7, 1, 1, 49, 48, 46, 48, 46,
+            49, 48, 46, 9, 50, 52, 57, 58, 50, 51, 55, 57, 8, 0, 0, 0, 8, 1, 1, 101, 116, 99, 100,
+            47, 101, 116, 99, 9, 100, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 9, 1, 1, 101, 116, 99, 100,
+            0, 0, 0, 0, 4, 0, 0, 0, 10, 1, 1, 101, 116, 99, 100, 45, 49, 0, 0, 6,
+        ];
+
+        let codec = McmpRowCodec::new(vec![
+            SortField::new(ConcreteDataType::string_datatype()),
+            SortField::new(ConcreteDataType::string_datatype()),
+            SortField::new(ConcreteDataType::uint32_datatype()),
+            SortField::new(ConcreteDataType::uint64_datatype()),
+            SortField::new(ConcreteDataType::string_datatype()),
+            SortField::new(ConcreteDataType::string_datatype()),
+            SortField::new(ConcreteDataType::string_datatype()),
+            SortField::new(ConcreteDataType::string_datatype()),
+            SortField::new(ConcreteDataType::string_datatype()),
+            SortField::new(ConcreteDataType::string_datatype()),
+            SortField::new(ConcreteDataType::string_datatype()),
+            SortField::new(ConcreteDataType::string_datatype()),
+            SortField::new(ConcreteDataType::string_datatype()),
+        ])
+        .with_primary_keys(vec![
+            11, 12, 2147483652, 2147483651, 2, 3, 4, 5, 6, 8, 9, 10, 7,
+        ]);
+
+        let values = codec.decode(&pk).unwrap();
+
+        println!("{:?}", values);
+    }
+
+    #[test]
+    fn test_sparse_primary_key_decoder() {
+        common_telemetry::init_default_ut_logging();
+        let mut pk = vec![];
+
+        let mut fields = HashMap::with_capacity(2);
+        fields.insert(
+            2147483652,
+            SortField::new(ConcreteDataType::uint32_datatype()),
+        );
+        fields.insert(
+            2147483651,
+            SortField::new(ConcreteDataType::uint64_datatype()),
+        );
+        let encoder = SparseEncoder {
+            fields: fields.clone(),
+        };
+
+        let mut serializer = Serializer::new(&mut pk);
+        2147483652_u32.serialize(&mut serializer).unwrap();
+        let value = ValueRef::UInt32(2);
+        fields
+            .get(&2147483652)
+            .unwrap()
+            .serialize(&mut serializer, &value)
+            .unwrap();
+
+        2147483651_u32.serialize(&mut serializer).unwrap();
+        let value = ValueRef::UInt64(3);
+        fields
+            .get(&2147483651)
+            .unwrap()
+            .serialize(&mut serializer, &value)
+            .unwrap();
+
+        println!("{:?}", pk);
+
+        let decoder = SparsePrimaryKeyDecoder::new(Arc::new(encoder));
+        let mut offsets_map = HashMap::new();
+        let offset = decoder.has_column(&pk, &mut offsets_map, 2147483652);
+        let value = decoder
+            .decode_value_at(&pk, offset.unwrap(), 2147483652)
+            .unwrap();
+        println!("offset: {:?}", offset);
+        println!("value: {:?}", value);
+        let offset = decoder.has_column(&pk, &mut offsets_map, 2147483651);
+        let value = decoder
+            .decode_value_at(&pk, offset.unwrap(), 2147483651)
+            .unwrap();
+        println!("offset: {:?}", offset);
+        println!("value: {:?}", value);
     }
 }

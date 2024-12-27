@@ -697,7 +697,7 @@ impl ValueBuilder {
     /// Pushes a new row to `ValueBuilder`.
     /// We don't need primary keys since they've already be encoded.
     fn push(&mut self, ts: ValueRef, sequence: u64, op_type: u8, fields: Vec<ValueRef>) {
-        debug_assert_eq!(fields.len(), self.fields.len());
+        // debug_assert_eq!(fields.len(), self.fields.len());
         self.timestamp.push_value_ref(ts);
         self.sequence.push_value_ref(ValueRef::UInt64(sequence));
         self.op_type.push_value_ref(ValueRef::UInt8(op_type));

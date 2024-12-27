@@ -71,12 +71,7 @@ impl PartitionTree {
         config: &PartitionTreeConfig,
         write_buffer_manager: Option<WriteBufferManagerRef>,
     ) -> PartitionTree {
-        let row_codec = McmpRowCodec::new(
-            metadata
-                .primary_key_columns()
-                .map(|c| SortField::new(c.column_schema.data_type.clone()))
-                .collect(),
-        );
+        let row_codec = McmpRowCodec::new_sparse(&metadata);
         let sparse_encoder = SparseEncoder {
             fields: metadata
                 .primary_key_columns()
@@ -418,6 +413,7 @@ impl PartitionTree {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct SparseEncoder {
     pub(crate) fields: HashMap<ColumnId, SortField>,
 }

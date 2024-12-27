@@ -21,12 +21,13 @@ use datatypes::value::Value;
 use datatypes::vectors::VectorRef;
 use snafu::{ensure, OptionExt, ResultExt};
 use store_api::metadata::{RegionMetadata, RegionMetadataRef};
+use store_api::metric_engine_consts::DATA_SCHEMA_TABLE_ID_COLUMN_NAME;
 use store_api::storage::ColumnId;
 
 use crate::error::{CompatReaderSnafu, CreateDefaultSnafu, Result};
 use crate::read::projection::ProjectionMapper;
 use crate::read::{Batch, BatchColumn, BatchReader};
-use crate::row_converter::{McmpRowCodec, RowCodec, SortField};
+use crate::row_converter::{McmpRowCodec, RowCodec, SortField, Values};
 
 /// Reader to adapt schema of underlying reader to expected schema.
 pub struct CompatReader<R> {
@@ -147,8 +148,20 @@ impl CompatPrimaryKey {
 
         // update cache
         if let Some(pk_values) = &mut batch.pk_values {
-            for value in &self.values {
-                pk_values.push(value.clone());
+            if self.converter.is_sparse() {
+                for (col_id, value) in self.converter.primary_keys().iter().zip(&self.values) {
+                    match pk_values {
+                        Values::Dense(_) => {}
+                        Values::Sparse(v) => v.insert(*col_id, value.clone()),
+                    }
+                }
+            } else {
+                for value in &self.values {
+                    match pk_values {
+                        Values::Dense(v) => v.push(value.clone()),
+                        Values::Sparse(_) => {}
+                    }
+                }
             }
         }
 
@@ -268,7 +281,17 @@ fn may_compat_primary_key(
             })?;
         values.push(default_value);
     }
-    let converter = McmpRowCodec::new(fields);
+
+    let is_partitioned = expect
+        .primary_key_columns()
+        .next()
+        .map(|meta| meta.column_schema.name == DATA_SCHEMA_TABLE_ID_COLUMN_NAME)
+        .unwrap_or(false);
+    let converter = if is_partitioned {
+        McmpRowCodec::new(fields).with_primary_keys(to_add.to_vec())
+    } else {
+        McmpRowCodec::new(fields)
+    };
 
     Ok(Some(CompatPrimaryKey { converter, values }))
 }

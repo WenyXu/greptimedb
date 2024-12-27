@@ -10,9 +10,13 @@ CREATE TABLE t2 (ts timestamp time index, job string primary key, val double) en
 
 SELECT * from t2;
 
-INSERT INTO t2 VALUES ('job1', 0, 0), ('job2', 1, 1);
+INSERT INTO t2 VALUES ('job1', 0, 1), ('job1', 0, 2), ('job2', 1, 3), ('job3', 2, 4), ('job4', 3, 5);
 
 SELECT * from t2;
+
+ADMIN FLUSH_TABLE('phy');
+
+SELECT * from t2 where job = 'job1';
 
 DROP TABLE t1;
 

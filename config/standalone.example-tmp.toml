@@ -143,7 +143,7 @@ provider = "raft_engine"
 ## The directory to store the WAL files.
 ## **It's only used when the provider is `raft_engine`**.
 ## @toml2docs:none-default
-dir = "/tmp/qa-greptimedb/wal"
+dir = "/tmp/greptimedb/wal"
 
 ## The size of the WAL segment file.
 ## **It's only used when the provider is `raft_engine`**.
@@ -322,7 +322,7 @@ retry_delay = "500ms"
 ## The data storage options.
 [storage]
 ## The working home directory.
-data_home = "/tmp/qa-greptimedb/"
+data_home = "/tmp/greptimedb/"
 
 ## The storage type used to store the data.
 ## - `File`: the data is stored in the local file system.
@@ -640,7 +640,7 @@ fork_dictionary_bytes = "1GiB"
 ## The logging options.
 [logging]
 ## The directory to store the log files. If set to empty, logs will not be written to files.
-dir = "/tmp/qa-greptimedb/logs"
+dir = "/tmp/greptimedb/logs"
 
 ## The log level. Can be `info`/`debug`/`warn`/`error`.
 ## @toml2docs:none-default

@@ -80,8 +80,8 @@ impl IndexValuesCodec {
                 )
             })
             .unzip();
-
-        let decoder = McmpRowCodec::new(fields.clone());
+        let primary_keys = column_ids.iter().map(|(id, _)| *id).collect();
+        let decoder = McmpRowCodec::new(fields.clone()).with_primary_keys(primary_keys);
         Self {
             column_ids,
             fields,

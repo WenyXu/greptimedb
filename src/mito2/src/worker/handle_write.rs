@@ -242,7 +242,6 @@ impl<S> RegionWorkerLoop<S> {
                 continue;
             }
 
-            debug!("push rows: {}", sender_req.request.rows.rows.len());
             // Collect requests by region.
             region_ctx.push_mutation(
                 sender_req.request.op_type as i32,

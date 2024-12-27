@@ -12,9 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use ahash::HashMapExt;
 use bytes::Buf;
 use common_base::bytes::Bytes;
 use common_decimal::Decimal128;
+use common_telemetry::debug;
 use common_time::time::Time;
 use common_time::{Date, Duration, IntervalDayTime, IntervalMonthDayNano, IntervalYearMonth};
 use datatypes::data_type::ConcreteDataType;
@@ -26,9 +31,41 @@ use paste::paste;
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
 use store_api::metadata::RegionMetadata;
+use store_api::metric_engine_consts::DATA_SCHEMA_TABLE_ID_COLUMN_NAME;
+use store_api::storage::ColumnId;
 
 use crate::error;
 use crate::error::{FieldTypeMismatchSnafu, NotSupportedFieldSnafu, Result, SerializeFieldSnafu};
+use crate::memtable::partition_tree::{SparseEncoder, SparsePrimaryKeyDecoder};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SparseValue {
+    values: HashMap<ColumnId, Value>,
+}
+
+impl SparseValue {
+    pub fn new(values: HashMap<ColumnId, Value>) -> Self {
+        Self { values }
+    }
+
+    pub fn get(&self, column_id: ColumnId) -> Option<&Value> {
+        self.values.get(&column_id)
+    }
+
+    pub fn get_or_null(&self, column_id: ColumnId) -> &Value {
+        self.values.get(&column_id).unwrap_or_else(|| &Value::Null)
+    }
+
+    pub fn insert(&mut self, column_id: ColumnId, value: Value) {
+        self.values.insert(column_id, value);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Values {
+    Dense(Vec<Value>),
+    Sparse(SparseValue),
+}
 
 /// Row value encoder/decoder.
 pub trait RowCodec {
@@ -48,6 +85,10 @@ pub trait RowCodec {
 
     /// Decode row values from bytes.
     fn decode(&self, bytes: &[u8]) -> Result<Vec<Value>>;
+
+    fn decode_sparse(&self, _bytes: &[u8]) -> Result<Values> {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -320,6 +361,11 @@ impl SortField {
 #[derive(Debug)]
 pub struct McmpRowCodec {
     fields: Vec<SortField>,
+    primary_keys: Vec<ColumnId>,
+    sparser_primary_key_decoder: Option<Arc<SparsePrimaryKeyDecoder>>,
+    table_id_decoder: Option<SortField>,
+    ts_id_decoder: Option<SortField>,
+    label_decoder: Option<SortField>,
 }
 
 impl McmpRowCodec {
@@ -333,8 +379,69 @@ impl McmpRowCodec {
         )
     }
 
+    pub fn new_sparse(metadata: &RegionMetadata) -> Self {
+        let is_partitioned = metadata
+            .primary_key_columns()
+            .next()
+            .map(|meta| meta.column_schema.name == DATA_SCHEMA_TABLE_ID_COLUMN_NAME)
+            .unwrap_or(false);
+        if is_partitioned {
+            let primary_keys = metadata
+                .primary_key_columns()
+                .map(|c| c.column_id)
+                .collect::<Vec<_>>();
+            debug!("primary_keys: {:?}", primary_keys);
+            Self::new(
+                metadata
+                    .primary_key_columns()
+                    .map(|c| SortField::new(c.column_schema.data_type.clone()))
+                    .collect(),
+            )
+            .with_primary_keys(primary_keys)
+        } else {
+            Self::new(
+                metadata
+                    .primary_key_columns()
+                    .map(|c| SortField::new(c.column_schema.data_type.clone()))
+                    .collect(),
+            )
+        }
+    }
+
+    pub fn is_sparse(&self) -> bool {
+        self.sparser_primary_key_decoder.is_some()
+    }
+
+    pub fn primary_keys(&self) -> &[ColumnId] {
+        &self.primary_keys
+    }
+
     pub fn new(fields: Vec<SortField>) -> Self {
-        Self { fields }
+        Self {
+            fields,
+            primary_keys: vec![],
+            sparser_primary_key_decoder: None,
+            table_id_decoder: None,
+            ts_id_decoder: None,
+            label_decoder: None,
+        }
+    }
+
+    pub fn with_primary_keys(mut self, primary_keys: Vec<ColumnId>) -> Self {
+        self.sparser_primary_key_decoder = Some(Arc::new(SparsePrimaryKeyDecoder::new(Arc::new(
+            SparseEncoder {
+                fields: primary_keys
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, c)| (*c, self.fields[idx].clone()))
+                    .collect::<ahash::HashMap<_, _>>(),
+            },
+        ))));
+        self.primary_keys = primary_keys;
+        self.table_id_decoder = Some(SortField::new(ConcreteDataType::uint32_datatype()));
+        self.ts_id_decoder = Some(SortField::new(ConcreteDataType::uint64_datatype()));
+        self.label_decoder = Some(SortField::new(ConcreteDataType::string_datatype()));
+        self
     }
 
     pub fn num_fields(&self) -> usize {
@@ -407,22 +514,93 @@ impl RowCodec for McmpRowCodec {
     where
         I: Iterator<Item = ValueRef<'a>>,
     {
-        buffer.reserve(self.estimated_size());
-        let mut serializer = Serializer::new(buffer);
-        for (value, field) in row.zip(self.fields.iter()) {
-            field.serialize(&mut serializer, &value)?;
+        if let Some(_) = self.sparser_primary_key_decoder.as_ref() {
+            buffer.reserve(self.estimated_size());
+            let mut serializer = Serializer::new(buffer);
+            for ((value, field), col_id) in
+                row.zip(self.fields.iter()).zip(self.primary_keys.iter())
+            {
+                col_id
+                    .serialize(&mut serializer)
+                    .context(SerializeFieldSnafu)?;
+                field.serialize(&mut serializer, &value)?;
+            }
+        } else {
+            buffer.reserve(self.estimated_size());
+            let mut serializer = Serializer::new(buffer);
+            for (value, field) in row.zip(self.fields.iter()) {
+                field.serialize(&mut serializer, &value)?;
+            }
         }
         Ok(())
     }
 
     fn decode(&self, bytes: &[u8]) -> Result<Vec<Value>> {
-        let mut deserializer = Deserializer::new(bytes);
-        let mut values = Vec::with_capacity(self.fields.len());
-        for f in &self.fields {
-            let value = f.deserialize(&mut deserializer)?;
-            values.push(value);
+        if let Some(decoder) = self.sparser_primary_key_decoder.as_ref() {
+            let mut values = Vec::with_capacity(self.fields.len());
+            let mut offset_map = ahash::HashMap::new();
+            for col_id in self.primary_keys.iter() {
+                if let Some(offset) = decoder.has_column(bytes, &mut offset_map, *col_id) {
+                    let value = decoder.decode_value_at(bytes, offset, *col_id)?;
+                    values.push(value);
+                } else {
+                    values.push(Value::Null);
+                }
+            }
+            Ok(values)
+        } else {
+            let mut deserializer = Deserializer::new(bytes);
+            let mut values = Vec::with_capacity(self.fields.len());
+            for f in &self.fields {
+                let value = f.deserialize(&mut deserializer)?;
+                values.push(value);
+            }
+            Ok(values)
         }
-        Ok(values)
+    }
+
+    fn decode_sparse(&self, bytes: &[u8]) -> Result<Values> {
+        if let Some(_) = self.sparser_primary_key_decoder.as_ref() {
+            let mut values = HashMap::new();
+            let mut deserializer = Deserializer::new(bytes);
+
+            let column_id = u32::deserialize(&mut deserializer).unwrap();
+            let value = self
+                .table_id_decoder
+                .as_ref()
+                .unwrap()
+                .deserialize(&mut deserializer)?;
+            values.insert(column_id, value);
+
+            let column_id = u32::deserialize(&mut deserializer).unwrap();
+            let value = self
+                .ts_id_decoder
+                .as_ref()
+                .unwrap()
+                .deserialize(&mut deserializer)?;
+            values.insert(column_id, value);
+
+            while deserializer.has_remaining() {
+                let column_id = u32::deserialize(&mut deserializer).unwrap();
+                let value = self
+                    .label_decoder
+                    .as_ref()
+                    .unwrap()
+                    .deserialize(&mut deserializer)?;
+                values.insert(column_id, value);
+            }
+
+            Ok(Values::Sparse(SparseValue::new(values)))
+        } else {
+            let mut deserializer = Deserializer::new(bytes);
+            let mut values = Vec::with_capacity(self.fields.len());
+            for f in &self.fields {
+                let value = f.deserialize(&mut deserializer)?;
+                values.push(value);
+            }
+
+            Ok(Values::Dense(values))
+        }
     }
 }
 

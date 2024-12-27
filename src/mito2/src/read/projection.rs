@@ -33,7 +33,7 @@ use store_api::storage::ColumnId;
 use crate::cache::CacheManager;
 use crate::error::{InvalidRequestSnafu, Result};
 use crate::read::Batch;
-use crate::row_converter::{McmpRowCodec, RowCodec, SortField};
+use crate::row_converter::{McmpRowCodec, RowCodec, Values};
 
 /// Only cache vector when its length `<=` this value.
 const MAX_VECTOR_LENGTH_TO_CACHE: usize = 16384;
@@ -80,12 +80,7 @@ impl ProjectionMapper {
             // Safety: idx is valid.
             column_schemas.push(metadata.schema.column_schemas()[*idx].clone());
         }
-        let codec = McmpRowCodec::new(
-            metadata
-                .primary_key_columns()
-                .map(|c| SortField::new(c.column_schema.data_type.clone()))
-                .collect(),
-        );
+        let codec = McmpRowCodec::new_sparse(&metadata);
         // Safety: Columns come from existing schema.
         let output_schema = Arc::new(Schema::new(column_schemas));
         // Get fields in each batch.
@@ -112,7 +107,7 @@ impl ProjectionMapper {
                     has_tags = true;
                     // We always read all primary key so the column always exists and the tag
                     // index is always valid.
-                    BatchIndex::Tag(index)
+                    BatchIndex::Tag(index, column.column_id)
                 }
                 SemanticType::Timestamp => BatchIndex::Timestamp,
                 SemanticType::Field => {
@@ -183,15 +178,15 @@ impl ProjectionMapper {
         // Skips decoding pk if we don't need to output it.
         let pk_values = if self.has_tags {
             match batch.pk_values() {
-                Some(v) => v.to_vec(),
+                Some(v) => v.clone(),
                 None => self
                     .codec
-                    .decode(batch.primary_key())
+                    .decode_sparse(batch.primary_key())
                     .map_err(BoxedError::new)
                     .context(ExternalSnafu)?,
             }
         } else {
-            Vec::new()
+            Values::Dense(Vec::new())
         };
 
         let mut columns = Vec::with_capacity(self.output_schema.num_columns());
@@ -202,8 +197,11 @@ impl ProjectionMapper {
             .zip(self.output_schema.column_schemas())
         {
             match index {
-                BatchIndex::Tag(idx) => {
-                    let value = &pk_values[*idx];
+                BatchIndex::Tag(idx, column_id) => {
+                    let value = match &pk_values {
+                        Values::Dense(v) => &v[*idx],
+                        Values::Sparse(v) => v.get_or_null(*column_id),
+                    };
                     let vector = match cache_manager {
                         Some(cache) => repeated_vector_with_cache(
                             &column_schema.data_type,
@@ -232,7 +230,7 @@ impl ProjectionMapper {
 #[derive(Debug, Clone, Copy)]
 enum BatchIndex {
     /// Index in primary keys.
-    Tag(usize),
+    Tag(usize, ColumnId),
     /// The time index column.
     Timestamp,
     /// Index in fields.
@@ -291,6 +289,7 @@ mod tests {
 
     use super::*;
     use crate::read::BatchBuilder;
+    use crate::row_converter::SortField;
     use crate::test_util::meta_util::TestRegionMetadataBuilder;
 
     fn new_batch(

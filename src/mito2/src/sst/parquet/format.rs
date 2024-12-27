@@ -31,6 +31,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use api::v1::SemanticType;
+use common_telemetry::debug;
 use common_time::Timestamp;
 use datafusion_common::ScalarValue;
 use datatypes::arrow::array::{ArrayRef, BinaryArray, DictionaryArray, UInt32Array, UInt64Array};
@@ -47,6 +48,7 @@ use store_api::storage::ColumnId;
 use crate::error::{
     ConvertVectorSnafu, InvalidBatchSnafu, InvalidRecordBatchSnafu, NewRecordBatchSnafu, Result,
 };
+use crate::memtable::partition_tree::Partition;
 use crate::read::{Batch, BatchBuilder, BatchColumn};
 use crate::row_converter::{McmpRowCodec, RowCodec, SortField};
 use crate::sst::file::{FileMeta, FileTimeRange};
@@ -289,8 +291,9 @@ impl ReadFormat {
         column_id: ColumnId,
     ) -> Option<ArrayRef> {
         let column = self.metadata.column_by_id(column_id)?;
+        let is_partitioned = Partition::has_multi_partitions(&self.metadata);
         match column.semantic_type {
-            SemanticType::Tag => self.tag_values(row_groups, column, true),
+            SemanticType::Tag => self.tag_values(row_groups, column, true, is_partitioned),
             SemanticType::Field => {
                 let index = self.field_id_to_index.get(&column_id)?;
                 Self::column_values(row_groups, column, *index, true)
@@ -309,8 +312,9 @@ impl ReadFormat {
         column_id: ColumnId,
     ) -> Option<ArrayRef> {
         let column = self.metadata.column_by_id(column_id)?;
+        let is_partitioned = Partition::has_multi_partitions(&self.metadata);
         match column.semantic_type {
-            SemanticType::Tag => self.tag_values(row_groups, column, false),
+            SemanticType::Tag => self.tag_values(row_groups, column, false, is_partitioned),
             SemanticType::Field => {
                 let index = self.field_id_to_index.get(&column_id)?;
                 Self::column_values(row_groups, column, *index, false)
@@ -372,6 +376,7 @@ impl ReadFormat {
         row_groups: &[impl Borrow<RowGroupMetaData>],
         column: &ColumnMetadata,
         is_min: bool,
+        is_partitioned: bool,
     ) -> Option<ArrayRef> {
         let is_first_tag = self
             .metadata
@@ -383,9 +388,16 @@ impl ReadFormat {
             // Only the min-max of the first tag is available in the primary key.
             return None;
         }
-
-        let converter =
-            McmpRowCodec::new(vec![SortField::new(column.column_schema.data_type.clone())]);
+        debug!(
+            "is_partitioned: {}, column_name: {}, column_id: {:?}",
+            is_partitioned, column.column_schema.name, column.column_id
+        );
+        let converter = if is_partitioned {
+            McmpRowCodec::new(vec![SortField::new(column.column_schema.data_type.clone())])
+                .with_primary_keys(vec![column.column_id])
+        } else {
+            McmpRowCodec::new(vec![SortField::new(column.column_schema.data_type.clone())])
+        };
         let values = row_groups.iter().map(|meta| {
             let stats = meta
                 .borrow()

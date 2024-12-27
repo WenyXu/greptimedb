@@ -128,7 +128,7 @@ pub struct KeyValue<'a> {
 impl KeyValue<'_> {
     /// Get primary key columns.
     pub fn primary_keys_with_column_id(&self) -> impl Iterator<Item = (ColumnId, ValueRef)> {
-        self.helper.indices[..self.helper.num_primary_key_column]
+        self.helper.indices[..(self.helper.num_primary_key_column)]
             .iter()
             .map(|idx| {
                 (
