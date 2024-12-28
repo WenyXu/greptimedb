@@ -586,7 +586,8 @@ impl RowCodec for McmpRowCodec {
                     .label_decoder
                     .as_ref()
                     .unwrap()
-                    .deserialize(&mut deserializer)?;
+                    .deserialize(&mut deserializer)
+                    .inspect_err(|e| common_telemetry::error!(e; "decode sparse: {:?}", bytes))?;
                 values.insert(column_id, value);
             }
 

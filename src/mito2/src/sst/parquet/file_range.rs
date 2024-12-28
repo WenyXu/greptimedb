@@ -265,7 +265,7 @@ impl RangeBase {
                     let pk_values = if let Some(pk_values) = input.pk_values() {
                         pk_values
                     } else {
-                        input.set_pk_values(self.codec.decode_sparse(input.primary_key())?);
+                        input.set_pk_values(self.codec.decode_sparse(input.primary_key()).inspect_err(|e| common_telemetry::error!(e; "Failed to decode primary key: {:?}", input.primary_key()))?);
                         input.pk_values().unwrap()
                     };
 

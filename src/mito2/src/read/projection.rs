@@ -182,6 +182,7 @@ impl ProjectionMapper {
                 None => self
                     .codec
                     .decode_sparse(batch.primary_key())
+                    .inspect_err(|e| common_telemetry::error!(e; "Failed to decode primary key, batch: {:?}", batch))
                     .map_err(BoxedError::new)
                     .context(ExternalSnafu)?,
             }

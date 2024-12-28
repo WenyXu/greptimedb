@@ -408,7 +408,9 @@ impl SparsePrimaryKeyDecoder {
         let mut deserializer = Deserializer::new(pk);
         deserializer.advance(offset);
         let field = self.codec.fields.get(&column_id).unwrap();
-        field.deserialize(&mut deserializer)
+        field
+            .deserialize(&mut deserializer)
+            .inspect_err(|e| common_telemetry::error!(e; "Failed to decode primary key, column_id: {:?}, pk: {:?}", column_id, pk))
     }
 }
 
@@ -765,12 +767,57 @@ mod tests {
     use ahash::{HashMap, HashMapExt};
     use datatypes::prelude::ConcreteDataType;
     use datatypes::value::ValueRef;
-    use memcomparable::Serializer;
-    use serde::Serialize;
+    use memcomparable::{Deserializer, Serializer};
+    use serde::{Deserialize, Serialize};
 
     use crate::memtable::partition_tree::partition::SparsePrimaryKeyDecoder;
     use crate::memtable::partition_tree::tree::SparseEncoder;
     use crate::row_converter::{McmpRowCodec, RowCodec, SortField};
+
+    #[test]
+    fn test_sparse_primary_key_decoder_0() {
+        common_telemetry::init_default_ut_logging();
+        let mut pk = vec![
+            1u8, 0, 0, 37, 233, 1, 4, 158, 44, 2, 247, 159, 150, 172, 1, 1, 101, 107, 115, 45, 97,
+            112, 45, 115, 9, 111, 117, 116, 104, 101, 97, 115, 116, 9, 45, 49, 45, 113, 97, 49, 0,
+            0, 6, 1, 1, 113, 97, 0, 0, 0, 0, 0, 0, 2, 1, 1, 102, 97, 108, 115, 101, 0, 0, 0, 5, 1,
+            1, 49, 48, 46, 48, 46, 51, 55, 46, 9, 50, 51, 56, 58, 50, 51, 50, 50, 9, 55, 0, 0, 0,
+            0, 0, 0, 0, 1, 1, 1, 107, 117, 98, 101, 114, 110, 101, 116, 9, 101, 115, 45, 112, 111,
+            100, 115, 0, 7, 1, 1, 106, 97, 114, 118, 105, 115, 0, 0, 6, 1, 1, 106, 97, 114, 118,
+            105, 115, 45, 112, 9, 114, 111, 100, 117, 99, 101, 114, 45, 9, 99, 100, 55, 56, 54, 52,
+            98, 99, 9, 102, 45, 106, 57, 52, 57, 100, 0, 7, 1, 1, 109, 111, 110, 105, 116, 111,
+            114, 105, 9, 110, 103, 47, 112, 114, 111, 109, 101, 9, 116, 104, 101, 117, 115, 45,
+            107, 117, 9, 98, 101, 45, 112, 114, 111, 109, 101, 9, 116, 104, 101, 117, 115, 45, 112,
+            114, 9, 111, 109, 101, 116, 104, 101, 117, 115, 8, 1, 1, 112, 114, 111, 109, 101, 116,
+            104, 101, 9, 117, 115, 45, 112, 114, 111, 109, 101, 9, 116, 104, 101, 117, 115, 45,
+            107, 117, 9, 98, 101, 45, 112, 114, 111, 109, 101, 9, 116, 104, 101, 117, 115, 45, 112,
+            114, 9, 111, 109, 101, 116, 104, 101, 117, 115, 9, 45, 48, 0, 0, 0, 0, 0, 0, 2, 1, 1,
+            116, 97, 115, 107, 115, 0, 0, 0, 5, 1, 1, 100, 111, 105, 110, 103, 0, 0, 0, 5, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let mut deserializer = Deserializer::new(pk.as_slice());
+        let table_id = Option::<u32>::deserialize(&mut deserializer).unwrap();
+        println!("table_id: {:?}", table_id);
+        let ts_id = Option::<u64>::deserialize(&mut deserializer).unwrap();
+        println!("ts_id: {:?}", ts_id);
+        while deserializer.has_remaining() {
+            let label = Option::<String>::deserialize(&mut deserializer).unwrap();
+            println!("label: {:?}", label);
+        }
+    }
 
     #[test]
     fn test_sparse_primary_key_decoder_1() {

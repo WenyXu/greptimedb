@@ -282,7 +282,7 @@ fn may_compat_primary_key(
         values.push(default_value);
     }
 
-    let is_partitioned = expect
+    let is_partitioned = actual
         .primary_key_columns()
         .next()
         .map(|meta| meta.column_schema.name == DATA_SCHEMA_TABLE_ID_COLUMN_NAME)
