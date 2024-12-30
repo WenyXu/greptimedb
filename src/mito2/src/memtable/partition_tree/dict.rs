@@ -235,11 +235,11 @@ fn compute_pk_weights(sorted_pk_indices: &[PkIndex], pk_weights: &mut Vec<u16>) 
 pub struct KeyDict {
     // TODO(yingwen): We can use key_positions to do a binary search.
     /// Unsorted key blocks.
-    dict_blocks: Vec<DictBlock>,
+    pub(crate) dict_blocks: Vec<DictBlock>,
     /// Maps pk index to position of the key in [Self::dict_blocks].
-    key_positions: Vec<PkIndex>,
+    pub(crate) key_positions: Vec<PkIndex>,
     /// Bytes of keys in the index.
-    key_bytes_in_index: usize,
+    pub(crate) key_bytes_in_index: usize,
 }
 
 pub type KeyDictRef = Arc<KeyDict>;

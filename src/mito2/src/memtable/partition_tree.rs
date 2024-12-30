@@ -656,6 +656,118 @@ mod tests {
         Arc::new(region_metadata)
     }
 
+    fn build_key_values_with_sparse_pk(
+        metadata: RegionMetadataRef,
+        labels: &[(&str, &str)],
+        table_id: &[u32],
+        ts_id: &[u64],
+        ts: &[i64],
+        values: &[f64],
+        sequence: u64,
+    ) -> KeyValues {
+        let mut builder = RegionMetadataBuilder::new(RegionId::new(123, 456));
+        builder
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "__table_id",
+                    ConcreteDataType::uint32_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id: 2147483652,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "__tsid",
+                    ConcreteDataType::uint64_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id: 2147483651,
+            });
+        let mut primary_keys = vec![2147483652u32, 2147483651];
+        for label in labels {
+            let column_id = primary_keys.len() as u32;
+            primary_keys.push(column_id);
+            builder.push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    label.0.to_string(),
+                    ConcreteDataType::string_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id,
+            });
+        }
+        builder
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "greptime_timestamp",
+                    ConcreteDataType::timestamp_millisecond_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Timestamp,
+                column_id: 0,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "greptime_value",
+                    ConcreteDataType::float64_datatype(),
+                    true,
+                ),
+                semantic_type: SemanticType::Field,
+                column_id: 1,
+            })
+            .primary_key(primary_keys);
+        let region_metadata = builder.build().unwrap();
+        let region_metadata = Arc::new(region_metadata);
+        let column_schema = region_metadata_to_row_schema(&region_metadata);
+
+        let rows = ts
+            .iter()
+            .zip(table_id.iter())
+            .zip(ts_id.iter())
+            .zip(values.iter())
+            .map(|(((ts, table_id), ts_id), val)| {
+                let mut values = vec![
+                    api::v1::Value {
+                        value_data: Some(ValueData::U32Value(*table_id)),
+                    },
+                    api::v1::Value {
+                        value_data: Some(ValueData::U64Value(*ts_id)),
+                    },
+                ];
+                values.extend_from_slice(
+                    &labels
+                        .iter()
+                        .map(|(_, label)| api::v1::Value {
+                            value_data: Some(ValueData::StringValue(label.to_string())),
+                        })
+                        .collect::<Vec<_>>(),
+                );
+                values.extend_from_slice(&[
+                    api::v1::Value {
+                        value_data: Some(ValueData::TimestampMillisecondValue(*ts)),
+                    },
+                    api::v1::Value {
+                        value_data: Some(ValueData::F64Value(*val)),
+                    },
+                ]);
+
+                Row { values }
+            })
+            .collect();
+        let mutation = api::v1::Mutation {
+            op_type: 1,
+            sequence,
+            rows: Some(Rows {
+                schema: column_schema,
+                rows,
+            }),
+        };
+        KeyValues::new(metadata.as_ref(), mutation).unwrap()
+    }
+
     fn build_key_values(
         metadata: RegionMetadataRef,
         labels: &[&str],
@@ -702,6 +814,157 @@ mod tests {
             }),
         };
         KeyValues::new(metadata.as_ref(), mutation).unwrap()
+    }
+
+    fn metadata_for_metric_engine_with_sparse_pk() -> RegionMetadataRef {
+        let mut builder = RegionMetadataBuilder::new(RegionId::new(123, 456));
+        builder
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "__table_id",
+                    ConcreteDataType::uint32_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id: 2147483652,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "__tsid",
+                    ConcreteDataType::uint64_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id: 2147483651,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "label1",
+                    ConcreteDataType::string_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id: 2,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "label2",
+                    ConcreteDataType::string_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id: 3,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "label3",
+                    ConcreteDataType::string_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id: 4,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "label4",
+                    ConcreteDataType::string_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id: 5,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "label5",
+                    ConcreteDataType::string_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id: 6,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "label6",
+                    ConcreteDataType::string_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Tag,
+                column_id: 7,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "greptime_timestamp",
+                    ConcreteDataType::timestamp_millisecond_datatype(),
+                    false,
+                ),
+                semantic_type: SemanticType::Timestamp,
+                column_id: 0,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "greptime_value",
+                    ConcreteDataType::float64_datatype(),
+                    true,
+                ),
+                semantic_type: SemanticType::Field,
+                column_id: 1,
+            })
+            .primary_key(vec![2147483652, 2147483651, 2, 3, 4, 5, 6, 7]);
+        let region_metadata = builder.build().unwrap();
+        Arc::new(region_metadata)
+    }
+
+    #[test]
+    fn test_write_sparse_primary_key_memtable() {
+        common_telemetry::init_default_ut_logging();
+        let metadata = metadata_for_metric_engine_with_sparse_pk();
+        let memtable = PartitionTreeMemtableBuilder::new(
+            PartitionTreeConfig {
+                index_max_keys_per_shard: 4,
+                ..Default::default()
+            },
+            None,
+        )
+        .build(1, &metadata);
+
+        for i in 0..20 {
+            let label1 = format!("label{}", i % 6 + 1);
+            let label2 = format!("label{}", i % 6 + 2);
+            let label1_value = format!("label{}_value{}", i % 6 + 1, i % 6);
+            let label2_value = format!("label{}_value{}", i % 6 + 2, i % 6);
+            memtable
+                .write(&build_key_values_with_sparse_pk(
+                    metadata.clone(),
+                    &[(&label1, &label1_value), (&label2, &label2_value)],
+                    &[1025, 1025],
+                    &[0, 1],
+                    &[1712070000000 + i, 1712717731000 + i],
+                    &[i as f64, i as f64 + 0.5],
+                    1,
+                ))
+                .unwrap();
+        }
+
+        let mut reader = memtable.iter(None, None).unwrap();
+        let codec = McmpRowCodec::new(
+            metadata
+                .primary_key_columns()
+                .map(|c| SortField::new(c.column_schema.data_type.clone()))
+                .collect(),
+        )
+        .with_primary_keys(
+            metadata
+                .primary_key_columns()
+                .map(|c| c.column_id)
+                .collect(),
+        );
+
+        while let Some(batch) = reader.next() {
+            let batch = batch.unwrap();
+            let pk = codec.decode(batch.primary_key()).unwrap();
+            let values = batch.fields();
+            println!("pk: {:?}, fields: {:?}", pk, values);
+        }
     }
 
     #[test]

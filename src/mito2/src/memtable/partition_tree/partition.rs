@@ -83,6 +83,11 @@ impl Partition {
 
         // Finds key in shards, now we ensure one key only exists in one shard.
         if let Some(pk_id) = inner.find_key_in_shards(primary_key) {
+            common_telemetry::debug!(
+                "find key in shards, pk_id: {:?}, \nprimary_key: {:?}",
+                pk_id,
+                primary_key
+            );
             inner.write_to_shard(pk_id, &key_value)?;
             inner.num_rows += 1;
             return Ok(());
@@ -103,9 +108,12 @@ impl Partition {
             inner.pk_to_pk_id.insert(sparse_key, pk_id);
         } else {
             // `primary_key` is already the full primary key.
-            let pk_id = inner
-                .shard_builder
-                .write_with_key(primary_key, None, &key_value, metrics);
+            let pk_id = inner.shard_builder.write_with_key(
+                primary_key,
+                Some(&primary_key),
+                &key_value,
+                metrics,
+            );
             inner.pk_to_pk_id.insert(std::mem::take(primary_key), pk_id);
         };
 

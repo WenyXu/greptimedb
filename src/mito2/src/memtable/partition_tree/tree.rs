@@ -139,6 +139,12 @@ impl PartitionTree {
                 // Use sparse encoder for metric engine.
                 self.sparse_encoder
                     .encode_to_vec(kv.primary_keys_with_column_id(), pk_buffer)?;
+                common_telemetry::debug!(
+                    "pk: {:?}, fields: {:?}, \nencoded: {:?}",
+                    kv.primary_keys_with_column_id().collect::<Vec<_>>(),
+                    kv.fields().collect::<Vec<_>>(),
+                    pk_buffer,
+                );
             } else {
                 self.row_codec.encode_to_vec(kv.primary_keys(), pk_buffer)?;
             }
