@@ -133,17 +133,6 @@ impl ShardBuilder {
             }
         };
 
-        if let Some(key_dict) = &key_dict {
-            for index in key_dict.key_positions.iter() {
-                common_telemetry::debug!(
-                    "index: {}, key: {:?}",
-                    index,
-                    key_dict.key_by_pk_index(*index)
-                );
-            }
-            common_telemetry::debug!("key_dict: {:?}", key_dict.key_positions.len());
-        }
-
         // build data parts.
         let data_parts =
             DataParts::new(metadata, DATA_INIT_CAP, self.dedup).with_frozen(vec![data_part]);

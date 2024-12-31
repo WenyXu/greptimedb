@@ -24,6 +24,8 @@ const CACHE_EVICTION_CAUSE: &str = "cause";
 pub const FLUSH_REASON: &str = "reason";
 /// File type label.
 pub const FILE_TYPE_LABEL: &str = "file_type";
+/// Scheme type label.
+pub const SCHEME_TYPE_LABEL: &str = "scheme_type";
 /// Region worker id label.
 pub const WORKER_LABEL: &str = "worker";
 /// Partition label.
@@ -283,7 +285,7 @@ lazy_static! {
     pub static ref INDEX_IO_BYTES_TOTAL: IntCounterVec = register_int_counter_vec!(
         "greptime_index_io_bytes_total",
         "index io bytes total",
-        &[TYPE_LABEL, FILE_TYPE_LABEL]
+        &[TYPE_LABEL, FILE_TYPE_LABEL, SCHEME_TYPE_LABEL]
     )
     .unwrap();
     /// Counter of read bytes on puffin files.
@@ -291,13 +293,13 @@ lazy_static! {
         .with_label_values(&["read", "puffin"]);
     /// Counter of write bytes on puffin files.
     pub static ref INDEX_PUFFIN_WRITE_BYTES_TOTAL: IntCounter = INDEX_IO_BYTES_TOTAL
-        .with_label_values(&["write", "puffin"]);
+        .with_label_values(&["write", "puffin","fs"]);
     /// Counter of read bytes on intermediate files.
     pub static ref INDEX_INTERMEDIATE_READ_BYTES_TOTAL: IntCounter = INDEX_IO_BYTES_TOTAL
-        .with_label_values(&["read", "intermediate"]);
+        .with_label_values(&["read", "intermediate","fs"]);
     /// Counter of write bytes on intermediate files.
     pub static ref INDEX_INTERMEDIATE_WRITE_BYTES_TOTAL: IntCounter = INDEX_IO_BYTES_TOTAL
-        .with_label_values(&["write", "intermediate"]);
+        .with_label_values(&["write", "intermediate","fs"]);
 
     /// Counter of r/w operations on index related IO operations, e.g. read, write, seek and flush.
     pub static ref INDEX_IO_OP_TOTAL: IntCounterVec = register_int_counter_vec!(

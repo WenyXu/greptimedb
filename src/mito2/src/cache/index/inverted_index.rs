@@ -215,7 +215,7 @@ mod test {
             register_int_counter_vec!("test_bytes", "a counter for test", &["test"]).unwrap();
         let counter = metric.with_label_values(&["test"]);
         let range_reader = store
-            .range_reader("data", &counter, &counter)
+            .range_reader("data", counter.clone(), &counter)
             .await
             .unwrap();
 

@@ -390,7 +390,6 @@ impl McmpRowCodec {
                 .primary_key_columns()
                 .map(|c| c.column_id)
                 .collect::<Vec<_>>();
-            debug!("primary_keys: {:?}", primary_keys);
             Self::new(
                 metadata
                     .primary_key_columns()

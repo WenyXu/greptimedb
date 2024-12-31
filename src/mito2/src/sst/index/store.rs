@@ -49,6 +49,11 @@ impl InstrumentedStore {
         }
     }
 
+    /// Returns the scheme type of the object store.    
+    pub fn scheme_type(&self) -> &str {
+        self.object_store.info().scheme().into_static()
+    }
+
     /// Set the size of the write buffer.
     pub fn with_write_buffer_size(mut self, write_buffer_size: Option<usize>) -> Self {
         self.write_buffer_size = write_buffer_size.filter(|&size| size > 0);
@@ -60,7 +65,7 @@ impl InstrumentedStore {
     pub async fn range_reader<'a>(
         &self,
         path: &str,
-        read_byte_count: &'a IntCounter,
+        read_byte_count: IntCounter,
         read_count: &'a IntCounter,
     ) -> Result<InstrumentedRangeReader<'a>> {
         Ok(InstrumentedRangeReader {
@@ -261,7 +266,7 @@ impl<W: AsyncWrite + Unpin + Send> AsyncWrite for InstrumentedAsyncWrite<'_, W> 
 pub(crate) struct InstrumentedRangeReader<'a> {
     store: ObjectStore,
     path: String,
-    read_byte_count: &'a IntCounter,
+    read_byte_count: IntCounter,
     read_count: &'a IntCounter,
     file_size_hint: Option<u64>,
 }

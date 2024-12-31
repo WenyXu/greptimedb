@@ -18,6 +18,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use common_error::ext::BoxedError;
 use object_store::{FuturesAsyncWriter, ObjectStore};
+use prometheus::IntCounter;
 use puffin::error::{self as puffin_error, Result as PuffinResult};
 use puffin::puffin_manager::file_accessor::PuffinFileAccessor;
 use puffin::puffin_manager::fs_puffin_manager::FsPuffinManager;
@@ -27,8 +28,8 @@ use snafu::ResultExt;
 
 use crate::error::{PuffinInitStagerSnafu, Result};
 use crate::metrics::{
-    INDEX_PUFFIN_FLUSH_OP_TOTAL, INDEX_PUFFIN_READ_BYTES_TOTAL, INDEX_PUFFIN_READ_OP_TOTAL,
-    INDEX_PUFFIN_WRITE_BYTES_TOTAL, INDEX_PUFFIN_WRITE_OP_TOTAL,
+    INDEX_IO_BYTES_TOTAL, INDEX_PUFFIN_FLUSH_OP_TOTAL, INDEX_PUFFIN_READ_BYTES_TOTAL,
+    INDEX_PUFFIN_READ_OP_TOTAL, INDEX_PUFFIN_WRITE_BYTES_TOTAL, INDEX_PUFFIN_WRITE_OP_TOTAL,
 };
 use crate::sst::index::store::{self, InstrumentedStore};
 
@@ -105,11 +106,18 @@ impl PuffinManagerFactory {
 #[derive(Clone)]
 pub(crate) struct ObjectStorePuffinFileAccessor {
     object_store: InstrumentedStore,
+    index_puffin_read_bytes_total: IntCounter,
 }
 
 impl ObjectStorePuffinFileAccessor {
     pub fn new(object_store: InstrumentedStore) -> Self {
-        Self { object_store }
+        let scheme_type = object_store.scheme_type();
+        let index_puffin_read_bytes_total: IntCounter =
+            INDEX_IO_BYTES_TOTAL.with_label_values(&["read", "puffin", scheme_type]);
+        Self {
+            object_store,
+            index_puffin_read_bytes_total,
+        }
     }
 }
 
@@ -122,7 +130,7 @@ impl PuffinFileAccessor for ObjectStorePuffinFileAccessor {
         self.object_store
             .range_reader(
                 puffin_file_name,
-                &INDEX_PUFFIN_READ_BYTES_TOTAL,
+                self.index_puffin_read_bytes_total.clone(),
                 &INDEX_PUFFIN_READ_OP_TOTAL,
             )
             .await

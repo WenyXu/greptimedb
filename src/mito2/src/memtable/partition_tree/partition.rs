@@ -83,11 +83,6 @@ impl Partition {
 
         // Finds key in shards, now we ensure one key only exists in one shard.
         if let Some(pk_id) = inner.find_key_in_shards(primary_key) {
-            common_telemetry::debug!(
-                "find key in shards, pk_id: {:?}, \nprimary_key: {:?}",
-                pk_id,
-                primary_key
-            );
             inner.write_to_shard(pk_id, &key_value)?;
             inner.num_rows += 1;
             return Ok(());
