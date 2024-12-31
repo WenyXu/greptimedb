@@ -71,7 +71,10 @@ pub struct IndexValuesCodec {
 
 impl IndexValuesCodec {
     /// Creates a new `IndexValuesCodec` from a list of `ColumnMetadata` of tag columns.
-    pub fn from_tag_columns<'a>(tag_columns: impl Iterator<Item = &'a ColumnMetadata>) -> Self {
+    pub fn from_tag_columns<'a>(
+        tag_columns: impl Iterator<Item = &'a ColumnMetadata>,
+        is_partitioned: bool,
+    ) -> Self {
         let (column_ids, fields): (Vec<_>, Vec<_>) = tag_columns
             .map(|column| {
                 (
@@ -81,7 +84,12 @@ impl IndexValuesCodec {
             })
             .unzip();
         let primary_keys = column_ids.iter().map(|(id, _)| *id).collect();
-        let decoder = McmpRowCodec::new(fields.clone()).with_primary_keys(primary_keys);
+        let decoder = if is_partitioned {
+            McmpRowCodec::new(fields.clone()).with_primary_keys(primary_keys)
+        } else {
+            McmpRowCodec::new(fields.clone())
+        };
+
         Self {
             column_ids,
             fields,
@@ -172,7 +180,7 @@ mod tests {
         .encode([ValueRef::Null, ValueRef::Int64(10)].into_iter())
         .unwrap();
 
-        let codec = IndexValuesCodec::from_tag_columns(tag_columns.iter());
+        let codec = IndexValuesCodec::from_tag_columns(tag_columns.iter(), false);
         let mut iter = codec.decode(&primary_key).unwrap();
 
         let ((column_id, col_id_str), field, value) = iter.next().unwrap();

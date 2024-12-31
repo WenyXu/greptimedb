@@ -35,6 +35,7 @@ use crate::error::{
     BiErrorsSnafu, IndexFinishSnafu, OperateAbortedIndexSnafu, PuffinAddBlobSnafu,
     PushIndexValueSnafu, Result,
 };
+use crate::memtable::partition_tree::Partition;
 use crate::read::Batch;
 use crate::row_converter::SortField;
 use crate::sst::file::FileId;
@@ -101,8 +102,9 @@ impl InvertedIndexer {
             memory_usage_threshold,
         );
         let index_creator = Box::new(SortIndexCreator::new(sorter, segment_row_count));
-
-        let codec = IndexValuesCodec::from_tag_columns(metadata.primary_key_columns());
+        let is_partitioned = Partition::has_multi_partitions(metadata);
+        let codec =
+            IndexValuesCodec::from_tag_columns(metadata.primary_key_columns(), is_partitioned);
         Self {
             codec,
             index_creator,

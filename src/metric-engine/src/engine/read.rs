@@ -147,7 +147,7 @@ impl MetricEngineInner {
         // add table filter
         request
             .filters
-            .push(self.table_id_filter(logical_region_id));
+            .insert(0, self.table_id_filter(logical_region_id));
 
         Ok(request)
     }
