@@ -681,6 +681,7 @@ impl ScanInput {
     }
 
     /// Prunes a file to scan and returns the builder to build readers.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     pub(crate) async fn prune_file(
         &self,
         file_index: usize,

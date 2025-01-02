@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use common_telemetry::tracing;
 use common_time::Timestamp;
 use datatypes::scalars::ScalarVectorBuilder;
 use datatypes::vectors::BooleanVectorBuilder;

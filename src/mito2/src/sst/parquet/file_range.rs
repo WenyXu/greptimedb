@@ -19,7 +19,7 @@ use std::ops::BitAnd;
 use std::sync::Arc;
 
 use api::v1::{OpType, SemanticType};
-use common_telemetry::error;
+use common_telemetry::{error, tracing};
 use datatypes::arrow::array::BooleanArray;
 use datatypes::arrow::buffer::BooleanBuffer;
 use parquet::arrow::arrow_reader::RowSelection;

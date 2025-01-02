@@ -148,7 +148,6 @@ impl SeqScan {
 
     /// Builds a reader to read sources. If `semaphore` is provided, reads sources in parallel
     /// if possible.
-    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     async fn build_reader_from_sources(
         stream_ctx: &StreamContext,
         mut sources: Vec<Source>,
@@ -192,6 +191,7 @@ impl SeqScan {
 
     /// Scans the given partition when the part list is set properly.
     /// Otherwise the returned stream might not contains any data.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     fn scan_partition_impl(
         &self,
         partition: usize,

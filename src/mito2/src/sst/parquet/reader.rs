@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use api::v1::SemanticType;
 use async_trait::async_trait;
 use common_recordbatch::filter::SimpleFilterEvaluator;
-use common_telemetry::{debug, warn};
+use common_telemetry::{debug, tracing, warn};
 use datafusion_expr::Expr;
 use datatypes::arrow::record_batch::RecordBatch;
 use datatypes::data_type::ConcreteDataType;
@@ -311,6 +311,7 @@ impl ParquetReaderBuilder {
     }
 
     /// Computes row groups to read, along with their respective row selections.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     async fn row_groups_to_read(
         &self,
         read_format: &ReadFormat,
@@ -1094,6 +1095,11 @@ impl BatchReader for RowGroupReader {
         let batch = self.batches.pop_front();
         self.metrics.num_rows += batch.as_ref().map(|b| b.num_rows()).unwrap_or(0);
         self.metrics.scan_cost += scan_start.elapsed();
+        debug!(
+            "batch: {:?}, num_rows: {:?}",
+            batch.as_ref().map(|b| b.primary_key()),
+            batch.as_ref().map(|b| b.num_rows())
+        );
         Ok(batch)
     }
 }

@@ -16,6 +16,7 @@
 
 use std::collections::HashMap;
 
+use common_telemetry::tracing;
 use datatypes::data_type::ConcreteDataType;
 use datatypes::value::Value;
 use datatypes::vectors::VectorRef;

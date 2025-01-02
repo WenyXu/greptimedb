@@ -16,6 +16,7 @@
 
 use std::collections::HashMap;
 
+use common_telemetry::tracing;
 use store_api::metadata::ColumnMetadata;
 use store_api::storage::RegionId;
 
@@ -26,6 +27,7 @@ impl MetricEngineInner {
     /// Load column metadata of a logical region.
     ///
     /// The return value is ordered on column name.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     pub async fn load_logical_columns(
         &self,
         physical_region_id: RegionId,
@@ -83,6 +85,7 @@ impl MetricEngineInner {
     /// Load logical column names of a logical region.
     ///
     /// The return value is ordered on column name alphabetically.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     pub async fn load_logical_column_names(
         &self,
         physical_region_id: RegionId,

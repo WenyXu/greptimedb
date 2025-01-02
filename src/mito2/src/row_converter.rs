@@ -19,7 +19,7 @@ use ahash::HashMapExt;
 use bytes::Buf;
 use common_base::bytes::Bytes;
 use common_decimal::Decimal128;
-use common_telemetry::debug;
+use common_telemetry::{debug, tracing};
 use common_time::time::Time;
 use common_time::{Date, Duration, IntervalDayTime, IntervalMonthDayNano, IntervalYearMonth};
 use datatypes::data_type::ConcreteDataType;

@@ -17,6 +17,7 @@ use std::sync::Arc;
 use api::v1::index::InvertedIndexMetas;
 use async_trait::async_trait;
 use bytes::Bytes;
+use common_telemetry::{debug, tracing};
 use index::inverted_index::error::Result;
 use index::inverted_index::format::reader::InvertedIndexReader;
 use prost::Message;
@@ -78,6 +79,7 @@ impl<R> CachedInvertedIndexBlobReader<R> {
 #[async_trait]
 impl<R: InvertedIndexReader> InvertedIndexReader for CachedInvertedIndexBlobReader<R> {
     async fn range_read(&mut self, offset: u64, size: u32) -> Result<Vec<u8>> {
+        debug!("range_read: {:?}, {:?}", offset, size);
         let inner = &mut self.inner;
         self.cache
             .get_or_load(

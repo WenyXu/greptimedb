@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use api::v1::SemanticType;
-use common_telemetry::{error, info, tracing};
+use common_telemetry::{debug, error, info, tracing};
 use datafusion::logical_expr::{self, Expr};
 use snafu::{OptionExt, ResultExt};
 use store_api::metadata::{RegionMetadataBuilder, RegionMetadataRef};
@@ -161,12 +162,14 @@ impl MetricEngineInner {
     /// Transform the projection from logical region to physical region.
     ///
     /// This method will not preserve internal columns.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     pub async fn transform_projection(
         &self,
         physical_region_id: RegionId,
         logical_region_id: RegionId,
         origin_projection: &[usize],
     ) -> Result<Vec<usize>> {
+        let now = Instant::now();
         // project on logical columns
         let all_logical_columns = self
             .load_logical_column_names(physical_region_id, logical_region_id)
@@ -189,11 +192,12 @@ impl MetricEngineInner {
             // Safety: logical columns is a strict subset of physical columns
             physical_projection.push(physical_metadata.column_index_by_name(&name).unwrap());
         }
-
+        debug!("transform_projection time: {:?}", now.elapsed());
         Ok(physical_projection)
     }
 
     /// Default projection for a logical region. Includes non-internal columns
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     pub async fn default_projection(
         &self,
         physical_region_id: RegionId,

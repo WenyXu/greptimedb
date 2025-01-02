@@ -644,10 +644,10 @@ dir = "/tmp/qa-greptimedb/logs"
 
 ## The log level. Can be `info`/`debug`/`warn`/`error`.
 ## @toml2docs:none-default
-level = "info"
+level = "info, mito2=debug"
 
 ## Enable OTLP tracing.
-enable_otlp_tracing = false
+enable_otlp_tracing = true
 
 ## The OTLP tracing endpoint.
 otlp_endpoint = "http://localhost:4317"
