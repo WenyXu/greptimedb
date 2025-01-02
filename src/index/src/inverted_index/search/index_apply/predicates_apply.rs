@@ -16,7 +16,7 @@ use std::mem::size_of;
 
 use async_trait::async_trait;
 use common_base::BitVec;
-use common_telemetry::tracing;
+use common_telemetry::{debug, tracing};
 use greptime_proto::v1::index::InvertedIndexMetas;
 
 use crate::inverted_index::error::{IndexNotFoundSnafu, Result};
@@ -24,7 +24,7 @@ use crate::inverted_index::format::reader::InvertedIndexReader;
 use crate::inverted_index::search::fst_apply::{
     FstApplier, IntersectionFstApplier, KeysFstApplier,
 };
-use crate::inverted_index::search::fst_values_mapper::FstValuesMapper;
+use crate::inverted_index::search::fst_values_mapper::ParallelFstValuesMapper;
 use crate::inverted_index::search::index_apply::{
     ApplyOutput, IndexApplier, IndexNotFoundStrategy, SearchContext,
 };
@@ -58,12 +58,12 @@ impl IndexApplier for PredicatesIndexApplier {
         };
 
         let mut bitmap = Self::bitmap_full_range(&metadata);
+        debug!("num fst_appliers: {}", self.fst_appliers.len());
         // TODO(zhongzc): optimize the order of applying to make it quicker to return empty.
+        let mut appliers = Vec::with_capacity(self.fst_appliers.len());
+        let mut fst_ranges = Vec::with_capacity(self.fst_appliers.len());
+        let mut metas = Vec::with_capacity(self.fst_appliers.len());
         for (name, fst_applier) in &self.fst_appliers {
-            if bitmap.count_ones() == 0 {
-                break;
-            }
-
             let Some(meta) = metadata.metas.get(name) else {
                 match context.index_not_found_strategy {
                     IndexNotFoundStrategy::ReturnEmpty => {
@@ -77,14 +77,26 @@ impl IndexApplier for PredicatesIndexApplier {
                     }
                 }
             };
-
             let fst_offset = meta.base_offset + meta.relative_fst_offset as u64;
-            let fst_size = meta.fst_size;
-            let fst = reader.fst(fst_offset, fst_size).await?;
-            let values = fst_applier.apply(&fst);
+            let fst_size = meta.fst_size as u64;
+            appliers.push(fst_applier);
+            metas.push(meta);
+            fst_ranges.push(fst_offset..fst_offset + fst_size);
+        }
 
-            let mut mapper = FstValuesMapper::new(&mut *reader, meta);
-            let bm = mapper.map_values(&values).await?;
+        let fsts = reader.fst_vec(&fst_ranges).await?;
+        let values_vec = fsts
+            .into_iter()
+            .zip(appliers)
+            .map(|(fst, fst_applier)| fst_applier.apply(&fst))
+            .collect::<Vec<_>>();
+        let mut mapper = ParallelFstValuesMapper::new(reader, metas);
+        let bm_vec = mapper.map_values_vec(&values_vec).await?;
+
+        for bm in bm_vec {
+            if bitmap.count_ones() == 0 {
+                break;
+            }
 
             bitmap &= bm;
         }

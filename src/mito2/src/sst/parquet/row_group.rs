@@ -18,6 +18,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{Buf, Bytes};
+use common_telemetry::tracing;
 use object_store::ObjectStore;
 use parquet::arrow::arrow_reader::{RowGroups, RowSelection};
 use parquet::arrow::ProjectionMask;
@@ -295,6 +296,7 @@ impl<'a> InMemoryRowGroup<'a> {
 
     /// Fetches data from write cache.
     /// Returns `None` if the data is not in the cache.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     async fn fetch_ranges_from_write_cache(
         &self,
         key: IndexKey,

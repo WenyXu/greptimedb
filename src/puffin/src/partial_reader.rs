@@ -16,6 +16,8 @@ mod r#async;
 mod position;
 mod sync;
 
+use std::sync::Mutex;
+
 use pin_project::pin_project;
 
 /// `PartialReader` to perform synchronous or asynchronous reads on a portion of a resource.
@@ -37,7 +39,7 @@ pub struct PartialReader<R> {
     /// A `None` value indicates that no read operations have been performed yet on this portion.
     /// Before a read operation can be performed, the resource must be positioned at the correct offset in the portion.
     /// After the first read operation, this field will be set to `Some(_)`, representing the current read position in the portion.
-    position_in_portion: Option<u64>,
+    position_in_portion: Mutex<Option<u64>>,
 }
 
 impl<R> PartialReader<R> {
@@ -47,13 +49,13 @@ impl<R> PartialReader<R> {
             offset,
             size,
             source,
-            position_in_portion: None,
+            position_in_portion: Mutex::new(None),
         }
     }
 
     /// Returns the current position in the portion.
     pub fn position(&self) -> u64 {
-        self.position_in_portion.unwrap_or_default()
+        self.position_in_portion.lock().unwrap().unwrap_or_default()
     }
 
     /// Returns the size of the portion in portion.

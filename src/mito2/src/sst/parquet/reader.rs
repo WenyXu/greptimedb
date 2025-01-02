@@ -176,6 +176,7 @@ impl ParquetReaderBuilder {
 
         let file_path = self.file_handle.file_path(&self.file_dir);
         let file_size = self.file_handle.meta_ref().file_size;
+        debug!("file_path: {}", file_path);
         // Loads parquet metadata of the file.
         let parquet_meta = self.read_parquet_metadata(&file_path, file_size).await?;
         // Decodes region metadata.
@@ -276,6 +277,7 @@ impl ParquetReaderBuilder {
     }
 
     /// Reads parquet metadata of specific file.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     async fn read_parquet_metadata(
         &self,
         file_path: &str,
@@ -437,6 +439,7 @@ impl ParquetReaderBuilder {
     /// TODO(zhongzc): Devise a mechanism to enforce the non-use of indices
     /// as an escape route in case of index issues, and it can be used to test
     /// the correctness of the index.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     async fn prune_row_groups_by_inverted_index(
         &self,
         row_group_size: usize,

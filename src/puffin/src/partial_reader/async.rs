@@ -27,13 +27,13 @@ impl<R: RangeReader> RangeReader for PartialReader<R> {
         // do nothing
     }
 
-    async fn metadata(&mut self) -> io::Result<Metadata> {
+    async fn metadata(&self) -> io::Result<Metadata> {
         Ok(Metadata {
             content_length: self.size,
         })
     }
 
-    async fn read(&mut self, range: Range<u64>) -> io::Result<Bytes> {
+    async fn read(&self, range: Range<u64>) -> io::Result<Bytes> {
         let absolute_range_start = self.offset + range.start;
         if absolute_range_start >= self.offset + self.size {
             return Err(io::Error::new(
@@ -45,15 +45,14 @@ impl<R: RangeReader> RangeReader for PartialReader<R> {
         let absolute_range = absolute_range_start..absolute_range_end;
 
         let result = self.source.read(absolute_range.clone()).await?;
-        self.position_in_portion = Some(absolute_range.end);
+        self.position_in_portion
+            .lock()
+            .unwrap()
+            .replace(absolute_range.end);
         Ok(result)
     }
 
-    async fn read_into(
-        &mut self,
-        range: Range<u64>,
-        buf: &mut (impl BufMut + Send),
-    ) -> io::Result<()> {
+    async fn read_into(&self, range: Range<u64>, buf: &mut (impl BufMut + Send)) -> io::Result<()> {
         let absolute_range_start = self.offset + range.start;
         if absolute_range_start >= self.offset + self.size {
             return Err(io::Error::new(
@@ -65,11 +64,14 @@ impl<R: RangeReader> RangeReader for PartialReader<R> {
         let absolute_range = absolute_range_start..absolute_range_end;
 
         self.source.read_into(absolute_range.clone(), buf).await?;
-        self.position_in_portion = Some(absolute_range.end);
+        self.position_in_portion
+            .lock()
+            .unwrap()
+            .replace(absolute_range.end);
         Ok(())
     }
 
-    async fn read_vec(&mut self, ranges: &[Range<u64>]) -> io::Result<Vec<Bytes>> {
+    async fn read_vec(&self, ranges: &[Range<u64>]) -> io::Result<Vec<Bytes>> {
         let absolute_ranges = ranges
             .iter()
             .map(|range| {
@@ -89,7 +91,10 @@ impl<R: RangeReader> RangeReader for PartialReader<R> {
 
         let results = self.source.read_vec(&absolute_ranges).await?;
         if let Some(last_range) = absolute_ranges.last() {
-            self.position_in_portion = Some(last_range.end);
+            self.position_in_portion
+                .lock()
+                .unwrap()
+                .replace(last_range.end);
         }
 
         Ok(results)

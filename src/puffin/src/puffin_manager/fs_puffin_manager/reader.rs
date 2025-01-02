@@ -322,29 +322,25 @@ where
         }
     }
 
-    async fn metadata(&mut self) -> io::Result<Metadata> {
+    async fn metadata(&self) -> io::Result<Metadata> {
         match self {
             Either::L(a) => a.metadata().await,
             Either::R(b) => b.metadata().await,
         }
     }
-    async fn read(&mut self, range: Range<u64>) -> io::Result<Bytes> {
+    async fn read(&self, range: Range<u64>) -> io::Result<Bytes> {
         match self {
             Either::L(a) => a.read(range).await,
             Either::R(b) => b.read(range).await,
         }
     }
-    async fn read_into(
-        &mut self,
-        range: Range<u64>,
-        buf: &mut (impl BufMut + Send),
-    ) -> io::Result<()> {
+    async fn read_into(&self, range: Range<u64>, buf: &mut (impl BufMut + Send)) -> io::Result<()> {
         match self {
             Either::L(a) => a.read_into(range, buf).await,
             Either::R(b) => b.read_into(range, buf).await,
         }
     }
-    async fn read_vec(&mut self, ranges: &[Range<u64>]) -> io::Result<Vec<Bytes>> {
+    async fn read_vec(&self, ranges: &[Range<u64>]) -> io::Result<Vec<Bytes>> {
         match self {
             Either::L(a) => a.read_vec(ranges).await,
             Either::R(b) => b.read_vec(ranges).await,

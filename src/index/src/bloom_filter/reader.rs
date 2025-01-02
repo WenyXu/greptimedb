@@ -29,7 +29,7 @@ use crate::bloom_filter::{BloomFilterMeta, BloomFilterSegmentLocation, SEED};
 const BLOOM_META_LEN_SIZE: u64 = 4;
 
 /// Default prefetch size of bloom filter meta.
-pub const DEFAULT_PREFETCH_SIZE: u64 = 1024; // 1KiB
+pub const DEFAULT_PREFETCH_SIZE: u64 = 8192; // 8KiB
 
 /// `BloomFilterReader` reads the bloom filter from the file.
 #[async_trait]
@@ -87,8 +87,8 @@ impl<R: RangeReader> BloomFilterReader for BloomFilterReaderImpl<R> {
         let metadata = self.reader.metadata().await.context(IoSnafu)?;
         let file_size = metadata.content_length;
 
-        let mut meta_reader =
-            BloomFilterMetaReader::new(&mut self.reader, file_size, Some(DEFAULT_PREFETCH_SIZE));
+        let meta_reader =
+            BloomFilterMetaReader::new(&self.reader, file_size, Some(DEFAULT_PREFETCH_SIZE));
         meta_reader.metadata().await
     }
 }
@@ -115,7 +115,7 @@ impl<R: RangeReader> BloomFilterMetaReader<R> {
     ///
     /// It will first prefetch some bytes from the end of the file,
     /// then parse the metadata from the prefetch bytes.
-    pub async fn metadata(&mut self) -> Result<BloomFilterMeta> {
+    pub async fn metadata(&self) -> Result<BloomFilterMeta> {
         ensure!(
             self.file_size >= BLOOM_META_LEN_SIZE,
             FileSizeTooSmallSnafu {

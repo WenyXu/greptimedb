@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use common_base::BitVec;
+use common_telemetry::debug;
 use greptime_proto::v1::index::InvertedIndexMetas;
 use snafu::ResultExt;
 
@@ -33,10 +35,11 @@ mod footer;
 #[async_trait]
 pub trait InvertedIndexReader: Send + Sync {
     /// Seeks to given offset and reads data with exact size as provided.
-    async fn range_read(&mut self, offset: u64, size: u32) -> Result<Vec<u8>>;
+    async fn range_read(&self, offset: u64, size: u32) -> Result<Vec<u8>>;
 
     /// Reads the bytes in the given ranges.
-    async fn read_vec(&mut self, ranges: &[Range<u64>]) -> Result<Vec<Bytes>> {
+    async fn read_vec(&self, ranges: &[Range<u64>]) -> Result<Vec<Bytes>> {
+        debug!("fallback to loop read");
         let mut result = Vec::with_capacity(ranges.len());
         for range in ranges {
             let data = self
@@ -56,8 +59,25 @@ pub trait InvertedIndexReader: Send + Sync {
         FstMap::new(fst_data).context(DecodeFstSnafu)
     }
 
+    async fn fst_vec(&mut self, ranges: &[Range<u64>]) -> Result<Vec<FstMap>> {
+        self.read_vec(ranges)
+            .await?
+            .into_iter()
+            .map(|bytes| FstMap::new(bytes.to_vec()).context(DecodeFstSnafu))
+            .collect::<Result<Vec<_>>>()
+    }
+
     /// Retrieves the bitmap from the given offset and size.
     async fn bitmap(&mut self, offset: u64, size: u32) -> Result<BitVec> {
         self.range_read(offset, size).await.map(BitVec::from_vec)
+    }
+
+    async fn bitmap_vec(&mut self, ranges: &[Range<u64>]) -> Result<VecDeque<BitVec>> {
+        Ok(self
+            .read_vec(ranges)
+            .await?
+            .into_iter()
+            .map(|bytes| BitVec::from_slice(bytes.as_ref()))
+            .collect::<VecDeque<_>>())
     }
 }

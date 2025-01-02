@@ -20,6 +20,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use common_telemetry::tracing;
 use object_store::Buffer;
 
 use crate::metrics::{CACHE_BYTES, CACHE_HIT, CACHE_MISS};
@@ -147,6 +148,7 @@ where
 
     /// Gets given range of index data from cache, and loads from source if the file
     /// is not already cached.
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     async fn get_or_load<F, Fut, E>(
         &self,
         key: K,

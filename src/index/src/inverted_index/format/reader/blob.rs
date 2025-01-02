@@ -18,12 +18,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use common_base::range_read::RangeReader;
+use common_telemetry::tracing;
 use greptime_proto::v1::index::InvertedIndexMetas;
 use snafu::{ensure, ResultExt};
 
-use super::footer::DEFAULT_PREFETCH_SIZE;
 use crate::inverted_index::error::{CommonIoSnafu, Result, UnexpectedBlobSizeSnafu};
-use crate::inverted_index::format::reader::footer::InvertedIndexFooterReader;
+use crate::inverted_index::format::reader::footer::{
+    InvertedIndexFooterReader, DEFAULT_PREFETCH_SIZE,
+};
 use crate::inverted_index::format::reader::InvertedIndexReader;
 use crate::inverted_index::format::MIN_BLOB_SIZE;
 
@@ -52,7 +54,7 @@ impl<R> InvertedIndexBlobReader<R> {
 
 #[async_trait]
 impl<R: RangeReader + Sync> InvertedIndexReader for InvertedIndexBlobReader<R> {
-    async fn range_read(&mut self, offset: u64, size: u32) -> Result<Vec<u8>> {
+    async fn range_read(&self, offset: u64, size: u32) -> Result<Vec<u8>> {
         let buf = self
             .source
             .read(offset..offset + size as u64)
@@ -61,16 +63,17 @@ impl<R: RangeReader + Sync> InvertedIndexReader for InvertedIndexBlobReader<R> {
         Ok(buf.into())
     }
 
-    async fn read_vec(&mut self, ranges: &[Range<u64>]) -> Result<Vec<Bytes>> {
+    async fn read_vec(&self, ranges: &[Range<u64>]) -> Result<Vec<Bytes>> {
         self.source.read_vec(ranges).await.context(CommonIoSnafu)
     }
 
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     async fn metadata(&mut self) -> Result<Arc<InvertedIndexMetas>> {
         let metadata = self.source.metadata().await.context(CommonIoSnafu)?;
         let blob_size = metadata.content_length;
         Self::validate_blob_size(blob_size)?;
 
-        let mut footer_reader = InvertedIndexFooterReader::new(&mut self.source, blob_size)
+        let footer_reader = InvertedIndexFooterReader::new(&self.source, blob_size)
             .with_prefetch_size(DEFAULT_PREFETCH_SIZE);
         footer_reader.metadata().await.map(Arc::new)
     }

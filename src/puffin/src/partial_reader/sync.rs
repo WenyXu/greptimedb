@@ -33,13 +33,14 @@ impl<R: io::Read + io::Seek> io::Read for PartialReader<R> {
         }
 
         // haven't read from the portion yet, need to seek to the start of it.
-        if self.position_in_portion.is_none() {
+        if self.position_in_portion.lock().unwrap().is_none() {
             self.source.seek(io::SeekFrom::Start(self.offset))?;
-            self.position_in_portion = Some(0);
+            self.position_in_portion.lock().unwrap().replace(0);
         }
 
         // prevent reading over the end
-        let max_len = (self.size() - self.position_in_portion.unwrap()) as usize;
+        let max_len =
+            (self.size() - self.position_in_portion.lock().unwrap().unwrap_or_default()) as usize;
         let actual_len = max_len.min(buf.len());
 
         // create a limited reader
@@ -47,7 +48,9 @@ impl<R: io::Read + io::Seek> io::Read for PartialReader<R> {
 
         // perform the actual read from the source and update the position.
         let read_bytes = self.source.read(target_buf)?;
-        self.position_in_portion = Some(self.position_in_portion.unwrap() + read_bytes as u64);
+        let mut v = self.position_in_portion.lock().unwrap();
+        let new_position = v.unwrap_or_default() + read_bytes as u64;
+        *v = Some(new_position);
 
         Ok(read_bytes)
     }
@@ -59,7 +62,10 @@ impl<R: io::Read + io::Seek> io::Seek for PartialReader<R> {
         let pos = io::SeekFrom::Start(self.offset + new_position);
         self.source.seek(pos)?;
 
-        self.position_in_portion = Some(new_position);
+        self.position_in_portion
+            .lock()
+            .unwrap()
+            .replace(new_position);
         Ok(new_position)
     }
 }

@@ -43,17 +43,18 @@ impl<'a> FstValuesMapper<'a> {
     /// Maps an array of FST values to a `BitVec` by retrieving and combining bitmaps.
     pub async fn map_values(&mut self, values: &[u64]) -> Result<BitVec> {
         let mut bitmap = BitVec::new();
-
+        let mut fetch_ragnes = Vec::with_capacity(values.len());
         for value in values {
-            // relative_offset (higher 32 bits), size (lower 32 bits)
             let [relative_offset, size] = bytemuck::cast::<u64, [u32; 2]>(*value);
+            fetch_ragnes.push(
+                self.metadata.base_offset + relative_offset as u64
+                    ..self.metadata.base_offset + relative_offset as u64 + size as u64,
+            );
+        }
 
-            let bm = self
-                .reader
-                .bitmap(self.metadata.base_offset + relative_offset as u64, size)
-                .await?;
+        let bitmaps = self.reader.bitmap_vec(&fetch_ragnes).await?;
 
-            // Ensure the longest BitVec is the left operand to prevent truncation during OR.
+        for bm in bitmaps {
             if bm.len() > bitmap.len() {
                 bitmap = bm | bitmap
             } else {
@@ -62,6 +63,57 @@ impl<'a> FstValuesMapper<'a> {
         }
 
         Ok(bitmap)
+    }
+}
+
+pub struct ParallelFstValuesMapper<'a> {
+    reader: &'a mut dyn InvertedIndexReader,
+    metadata: Vec<&'a InvertedIndexMeta>,
+}
+
+impl<'a> ParallelFstValuesMapper<'a> {
+    pub fn new(
+        reader: &'a mut dyn InvertedIndexReader,
+        metadata: Vec<&'a InvertedIndexMeta>,
+    ) -> Self {
+        Self { reader, metadata }
+    }
+
+    pub async fn map_values_vec(&mut self, values_vec: &[Vec<u64>]) -> Result<Vec<BitVec>> {
+        let values_num = values_vec
+            .iter()
+            .map(|values| values.len())
+            .collect::<Vec<_>>();
+        let len = values_num.iter().sum::<usize>();
+        let mut fetch_ranges = Vec::with_capacity(len);
+
+        for (meta, values) in self.metadata.iter().zip(values_vec) {
+            for value in values {
+                let [relative_offset, size] = bytemuck::cast::<u64, [u32; 2]>(*value);
+                fetch_ranges.push(
+                    meta.base_offset + relative_offset as u64
+                        ..meta.base_offset + relative_offset as u64 + size as u64,
+                );
+            }
+        }
+
+        let mut bitmaps = self.reader.bitmap_vec(&fetch_ranges).await?;
+        let mut output = Vec::with_capacity(values_num.len());
+        for num in values_num {
+            let mut bitmap = BitVec::new();
+            for _ in 0..num {
+                let bm = bitmaps.pop_front().unwrap();
+                if bm.len() > bitmap.len() {
+                    bitmap = bm | bitmap
+                } else {
+                    bitmap |= bm
+                }
+            }
+
+            output.push(bitmap);
+        }
+
+        Ok(output)
     }
 }
 

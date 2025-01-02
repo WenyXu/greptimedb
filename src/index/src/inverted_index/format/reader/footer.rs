@@ -24,7 +24,7 @@ use crate::inverted_index::error::{
 };
 use crate::inverted_index::format::FOOTER_PAYLOAD_SIZE_SIZE;
 
-pub const DEFAULT_PREFETCH_SIZE: u64 = 1024; // 1KiB
+pub const DEFAULT_PREFETCH_SIZE: u64 = 8192; // 8KiB
 
 /// InvertedIndexFooterReader is for reading the footer section of the blob.
 pub struct InvertedIndexFooterReader<R> {
@@ -53,8 +53,8 @@ impl<R> InvertedIndexFooterReader<R> {
     }
 }
 
-impl<R: RangeReader> InvertedIndexFooterReader<R> {
-    pub async fn metadata(&mut self) -> Result<InvertedIndexMetas> {
+impl<R: RangeReader> InvertedIndexFooterReader<&R> {
+    pub async fn metadata(&self) -> Result<InvertedIndexMetas> {
         ensure!(
             self.blob_size >= FOOTER_PAYLOAD_SIZE_SIZE,
             BlobSizeTooSmallSnafu
@@ -97,7 +97,7 @@ impl<R: RangeReader> InvertedIndexFooterReader<R> {
         Ok(bytes)
     }
 
-    fn parse_payload(&mut self, bytes: &[u8], payload_size: u64) -> Result<InvertedIndexMetas> {
+    fn parse_payload(&self, bytes: &[u8], payload_size: u64) -> Result<InvertedIndexMetas> {
         let metas = InvertedIndexMetas::decode(bytes).context(DecodeProtoSnafu)?;
         self.validate_metas(&metas, payload_size)?;
         Ok(metas)

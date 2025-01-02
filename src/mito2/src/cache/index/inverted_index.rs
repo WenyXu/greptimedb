@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::ops::Range;
 use std::sync::Arc;
 
 use api::v1::index::InvertedIndexMetas;
 use async_trait::async_trait;
 use bytes::Bytes;
 use common_telemetry::{debug, tracing};
+use futures::future::join_all;
 use index::inverted_index::error::Result;
 use index::inverted_index::format::reader::InvertedIndexReader;
+use itertools::Itertools;
 use prost::Message;
 
 use crate::cache::index::{IndexCache, PageKey, INDEX_METADATA_TYPE};
@@ -78,9 +81,10 @@ impl<R> CachedInvertedIndexBlobReader<R> {
 
 #[async_trait]
 impl<R: InvertedIndexReader> InvertedIndexReader for CachedInvertedIndexBlobReader<R> {
-    async fn range_read(&mut self, offset: u64, size: u32) -> Result<Vec<u8>> {
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
+    async fn range_read(&self, offset: u64, size: u32) -> Result<Vec<u8>> {
         debug!("range_read: {:?}, {:?}", offset, size);
-        let inner = &mut self.inner;
+        let inner = &self.inner;
         self.cache
             .get_or_load(
                 self.file_id,
@@ -90,6 +94,27 @@ impl<R: InvertedIndexReader> InvertedIndexReader for CachedInvertedIndexBlobRead
                 move |ranges| async move { inner.read_vec(&ranges).await },
             )
             .await
+    }
+
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
+    async fn read_vec(&self, ranges: &[Range<u64>]) -> Result<Vec<Bytes>> {
+        debug!("read_vec: {:?}", ranges);
+        let fetch = ranges.iter().map(|range| {
+            let inner = &self.inner;
+            self.cache.get_or_load(
+                self.file_id,
+                self.file_size,
+                range.start,
+                (range.end - range.start) as u32,
+                move |ranges| async move { inner.read_vec(&ranges).await },
+            )
+        });
+        let results = join_all(fetch)
+            .await
+            .into_iter()
+            .map_ok(|bytes| Bytes::from(bytes))
+            .collect::<Result<Vec<_>>>();
+        results
     }
 
     async fn metadata(&mut self) -> Result<Arc<InvertedIndexMetas>> {
