@@ -23,7 +23,7 @@ use common_error::ext::BoxedError;
 use common_recordbatch::error::ExternalSnafu;
 use common_recordbatch::util::ChainedRecordBatchStream;
 use common_recordbatch::{RecordBatchStreamWrapper, SendableRecordBatchStream};
-use common_telemetry::tracing;
+use common_telemetry::{debug, tracing};
 use datafusion::physical_plan::{DisplayAs, DisplayFormatType};
 use datatypes::schema::SchemaRef;
 use snafu::ResultExt;
@@ -233,6 +233,7 @@ impl SeqScan {
             },
         );
 
+        debug!("scan_partition_impl: ranges: {:?}", stream_ctx.ranges);
         let stream = try_stream! {
             part_metrics.on_first_poll();
 
@@ -240,6 +241,7 @@ impl SeqScan {
                 stream_ctx.input.num_memtables(),
                 stream_ctx.input.num_files(),
             ));
+            stream_ctx.prefetch_files().await.map_err(BoxedError::new).context(ExternalSnafu)?;
             // Scans each part.
             for part_range in partition_ranges {
                 let mut sources = Vec::new();

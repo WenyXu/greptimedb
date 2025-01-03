@@ -366,7 +366,7 @@ fn maybe_split_ranges_for_seq_scan(ranges: Vec<RangeMeta>) -> Vec<RangeMeta> {
 }
 
 /// Builder to create file ranges.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct FileRangeBuilder {
     /// Context for the file.
     /// None indicates nothing to read.

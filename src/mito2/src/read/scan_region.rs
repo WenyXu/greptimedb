@@ -24,11 +24,12 @@ use common_recordbatch::SendableRecordBatchStream;
 use common_telemetry::{debug, error, tracing, warn};
 use common_time::range::TimestampRange;
 use datafusion_expr::utils::expr_to_columns;
+use futures::future::join_all;
 use smallvec::SmallVec;
 use store_api::region_engine::{PartitionRange, RegionScannerRef};
 use store_api::storage::{ScanRequest, TimeSeriesRowSelector};
 use table::predicate::{build_time_range_predicate, Predicate};
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{mpsc, Mutex, Notify, RwLock, Semaphore};
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::access_layer::AccessLayerRef;
@@ -512,6 +513,8 @@ pub(crate) struct ScanInput {
     pub(crate) merge_mode: MergeMode,
     /// Hint to select rows from time series.
     pub(crate) series_row_selector: Option<TimeSeriesRowSelector>,
+    /// Prefetched files.
+    pub(crate) prefetch_files: RwLock<Vec<(FileRangeBuilder, ReaderMetrics)>>,
 }
 
 impl ScanInput {
@@ -535,6 +538,7 @@ impl ScanInput {
             filter_deleted: true,
             merge_mode: MergeMode::default(),
             series_row_selector: None,
+            prefetch_files: RwLock::new(Vec::new()),
         }
     }
 
@@ -680,6 +684,93 @@ impl ScanInput {
         ranges
     }
 
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
+    pub(crate) async fn prefetch_files(&self) -> Result<()> {
+        let mut results = self.prefetch_files.write().await;
+        if !results.is_empty() {
+            return Ok(());
+        }
+        debug!("prefetching files");
+        let mut tasks = Vec::with_capacity(self.files.len());
+        for (i, _) in self.files.iter().enumerate() {
+            let access_layer = self.access_layer.clone();
+            let file = self.files[i].clone();
+            let predicate = self.predicate.clone();
+            let mapper = self.mapper.clone();
+            let cache_manager = self.cache_manager.clone();
+            let inverted_index_applier = self.inverted_index_applier.clone();
+            let fulltext_index_applier = self.fulltext_index_applier.clone();
+            let ignore_file_not_found = self.ignore_file_not_found;
+
+            tasks.push(async move {
+                let mut metrics = ReaderMetrics::default();
+                Self::prune_file_async(
+                    access_layer,
+                    file,
+                    predicate,
+                    mapper,
+                    cache_manager,
+                    inverted_index_applier,
+                    fulltext_index_applier,
+                    ignore_file_not_found,
+                    &mut metrics,
+                )
+                .await
+                .map(|result| (result, metrics))
+            });
+        }
+
+        let files = join_all(tasks)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
+        *results = files;
+        Ok(())
+    }
+
+    #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
+    pub(crate) async fn prune_file_async(
+        access_layer: AccessLayerRef,
+        file: FileHandle,
+        predicate: Option<Predicate>,
+        mapper: Arc<ProjectionMapper>,
+        cache_manager: Option<CacheManagerRef>,
+        inverted_index_applier: Option<InvertedIndexApplierRef>,
+        fulltext_index_applier: Option<FulltextIndexApplierRef>,
+        ignore_file_not_found: bool,
+        reader_metrics: &mut ReaderMetrics,
+    ) -> Result<FileRangeBuilder> {
+        let res = access_layer
+            .read_sst(file.clone())
+            .predicate(predicate.clone())
+            .projection(Some(mapper.column_ids().to_vec()))
+            .cache(cache_manager.clone())
+            .inverted_index_applier(inverted_index_applier.clone())
+            .fulltext_index_applier(fulltext_index_applier.clone())
+            .expected_metadata(Some(mapper.metadata().clone()))
+            .build_reader_input(reader_metrics)
+            .await;
+        let (mut file_range_ctx, row_groups) = match res {
+            Ok(x) => x,
+            Err(e) => {
+                if e.is_object_not_found() && ignore_file_not_found {
+                    error!(e; "File to scan does not exist, region_id: {}, file: {}", file.region_id(), file.file_id());
+                    return Ok(FileRangeBuilder::default());
+                } else {
+                    return Err(e);
+                }
+            }
+        };
+        if !compat::has_same_columns(mapper.metadata(), file_range_ctx.read_format().metadata()) {
+            // They have different schema. We need to adapt the batch first so the
+            // mapper can convert it.
+            let compat =
+                CompatBatch::new(&mapper, file_range_ctx.read_format().metadata().clone())?;
+            file_range_ctx.set_compat_batch(Some(compat));
+        }
+        Ok(FileRangeBuilder::new(Arc::new(file_range_ctx), row_groups))
+    }
+
     /// Prunes a file to scan and returns the builder to build readers.
     #[tracing::instrument(level = tracing::Level::DEBUG, skip_all)]
     pub(crate) async fn prune_file(
@@ -687,6 +778,14 @@ impl ScanInput {
         file_index: usize,
         reader_metrics: &mut ReaderMetrics,
     ) -> Result<FileRangeBuilder> {
+        let files = self.prefetch_files.read().await;
+        if !files.is_empty() {
+            let result = files[file_index].0.clone();
+            let metrics = &files[file_index].1;
+            reader_metrics.merge_from(metrics);
+            return Ok(result);
+        }
+
         let file = &self.files[file_index];
         let res = self
             .access_layer
@@ -798,6 +897,10 @@ pub(crate) struct StreamContext {
 }
 
 impl StreamContext {
+    pub(crate) async fn prefetch_files(&self) -> Result<()> {
+        self.input.prefetch_files().await
+    }
+
     /// Creates a new [StreamContext] for [SeqScan].
     pub(crate) fn seq_scan_ctx(input: ScanInput, compaction: bool) -> Self {
         let query_start = input.query_start.unwrap_or_else(Instant::now);
