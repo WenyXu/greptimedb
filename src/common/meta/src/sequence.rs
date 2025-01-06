@@ -15,6 +15,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use common_telemetry::info;
 use snafu::ensure;
 use tokio::sync::Mutex;
 
@@ -167,9 +168,11 @@ impl Inner {
                 expect,
                 value: value.to_vec(),
             };
+            info!("req: {:?}", req);
 
             let res = self.generator.compare_and_put(req).await?;
 
+            info!("res: {:?}", res);
             if !res.success {
                 if let Some(kv) = res.prev_kv {
                     let v: [u8; 8] = match kv.value.clone().try_into() {

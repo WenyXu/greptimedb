@@ -658,8 +658,9 @@ pub enum Error {
     GetCache { source: Arc<Error> },
 
     #[cfg(feature = "pg_kvbackend")]
-    #[snafu(display("Failed to execute via Postgres"))]
+    #[snafu(display("Failed to execute via Postgres, sql: {}", sql))]
     PostgresExecution {
+        sql: String,
         #[snafu(source)]
         error: tokio_postgres::Error,
         #[snafu(implicit)]

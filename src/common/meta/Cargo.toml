@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
+default = ["pg_kvbackend"]
 testing = []
 pg_kvbackend = ["dep:tokio-postgres"]
 

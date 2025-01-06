@@ -61,14 +61,18 @@ pub async fn prepare_kv_with_prefix(kv_backend: &impl KvBackend, prefix: Vec<u8>
 
 pub async fn unprepare_kv(kv_backend: &impl KvBackend, prefix: &[u8]) {
     let range_end = util::get_prefix_end_key(prefix);
-    assert!(kv_backend
-        .delete_range(DeleteRangeRequest {
-            key: prefix.to_vec(),
-            range_end,
-            ..Default::default()
-        })
-        .await
-        .is_ok());
+    assert!(
+        kv_backend
+            .delete_range(DeleteRangeRequest {
+                key: prefix.to_vec(),
+                range_end,
+                ..Default::default()
+            })
+            .await
+            .is_ok(),
+        "prefix: {:?}",
+        std::str::from_utf8(prefix).unwrap()
+    );
 }
 
 pub async fn test_kv_put(kv_backend: &impl KvBackend) {
