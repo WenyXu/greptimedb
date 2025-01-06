@@ -1153,6 +1153,7 @@ mod tests {
                 schema: column_schema,
                 rows,
             }),
+            write_hint: 0,
         };
         KeyValues::new(schema.as_ref(), mutation).unwrap()
     }
