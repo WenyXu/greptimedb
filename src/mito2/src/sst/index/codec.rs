@@ -113,7 +113,7 @@ impl IndexValuesCodec {
                         .zip(&self.ordered_fields)
                         .map(|(value, column_id)| {
                             if value.is_null() {
-                                (*column_id, None) 
+                                (*column_id, None)
                             } else {
                                 (*column_id, Some(value))
                             }
