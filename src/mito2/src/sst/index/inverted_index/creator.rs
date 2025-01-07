@@ -101,7 +101,7 @@ impl InvertedIndexer {
         );
         let index_creator = Box::new(SortIndexCreator::new(sorter, segment_row_count));
 
-        let codec = IndexValuesCodec::from_tag_columns(metadata.primary_key_columns());
+        let codec = IndexValuesCodec::from_tag_columns(metadata);
         Self {
             codec,
             index_creator,
@@ -180,11 +180,13 @@ impl InvertedIndexer {
         let n = batch.num_rows();
         guard.inc_row_count(n);
 
-        for ((col_id, col_id_str), field, value) in self.codec.decode(batch.primary_key())? {
-            if !self.indexed_column_ids.contains(col_id) {
+        for (col_id, value) in self.codec.decode(batch.primary_key())? {
+            if !self.indexed_column_ids.contains(&col_id) {
                 continue;
             }
 
+            // Safety: col_id is always in the indexed_column_ids
+            let (col_id_str, field) = self.codec.field_encoder(&col_id).unwrap();
             if let Some(value) = value.as_ref() {
                 self.value_buf.clear();
                 IndexValueCodec::encode_nonnull_value(
@@ -386,7 +388,7 @@ mod tests {
         ];
         let codec = McmpRowCodec::new(fields);
         let row: [ValueRef; 2] = [str_tag.as_ref().into(), i32_tag.into().into()];
-        let primary_key = codec.encode(row.into_iter()).unwrap();
+        let primary_key = codec.encode(row.into_iter().map(|v| (1, v))).unwrap();
 
         let u64_field = BatchColumn {
             column_id: 4,

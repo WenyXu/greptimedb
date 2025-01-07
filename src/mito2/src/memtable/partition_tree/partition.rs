@@ -260,7 +260,7 @@ impl Partition {
             return PartitionKey::default();
         }
 
-        let Some(value) = key_value.primary_keys().next() else {
+        let Some((_, value)) = key_value.primary_keys().next() else {
             return PartitionKey::default();
         };
 

@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use api::v1::{ColumnSchema, Mutation, OpType, Row, Rows};
 use datatypes::value::ValueRef;
 use store_api::metadata::RegionMetadata;
-use store_api::storage::SequenceNumber;
+use store_api::storage::{ColumnId, SequenceNumber};
 
 /// Key value view of a mutation.
 #[derive(Debug)]
@@ -147,15 +147,18 @@ pub struct KeyValue<'a> {
 
 impl KeyValue<'_> {
     /// Get primary key columns.
-    pub fn primary_keys(&self) -> impl Iterator<Item = ValueRef> {
+    pub fn primary_keys(&self) -> impl Iterator<Item = (ColumnId, ValueRef)> {
         self.helper.indices[..self.helper.num_primary_key_column]
             .iter()
-            .map(|idx| match idx {
-                Some(i) => api::helper::pb_value_to_value_ref(
-                    &self.row.values[*i],
-                    &self.schema[*i].datatype_extension,
+            .map(|idx| match idx.index {
+                Some(i) => (
+                    idx.column_id,
+                    api::helper::pb_value_to_value_ref(
+                        &self.row.values[i],
+                        &self.schema[i].datatype_extension,
+                    ),
                 ),
-                None => ValueRef::Null,
+                None => (idx.column_id, ValueRef::Null),
             })
     }
 
@@ -163,10 +166,10 @@ impl KeyValue<'_> {
     pub fn fields(&self) -> impl Iterator<Item = ValueRef> {
         self.helper.indices[self.helper.num_primary_key_column + 1..]
             .iter()
-            .map(|idx| match idx {
+            .map(|idx| match idx.index {
                 Some(i) => api::helper::pb_value_to_value_ref(
-                    &self.row.values[*i],
-                    &self.schema[*i].datatype_extension,
+                    &self.row.values[i],
+                    &self.schema[i].datatype_extension,
                 ),
                 None => ValueRef::Null,
             })
@@ -175,7 +178,9 @@ impl KeyValue<'_> {
     /// Get timestamp.
     pub fn timestamp(&self) -> ValueRef {
         // Timestamp is primitive, we clone it.
-        let index = self.helper.indices[self.helper.num_primary_key_column].unwrap();
+        let index = self.helper.indices[self.helper.num_primary_key_column]
+            .index
+            .unwrap();
         api::helper::pb_value_to_value_ref(
             &self.row.values[index],
             &self.schema[index].datatype_extension,
@@ -210,9 +215,15 @@ struct SparseReadRowHelper {
     ///
     /// `indices[..num_primary_key_column]` are primary key columns, `indices[num_primary_key_column]`
     /// is the timestamp column and remainings are field columns.
-    indices: Vec<Option<usize>>,
+    indices: Vec<ValueIndex>,
     /// Number of primary key columns.
     num_primary_key_column: usize,
+}
+
+#[derive(Debug)]
+struct ValueIndex {
+    column_id: ColumnId,
+    index: Option<usize>,
 }
 
 impl SparseReadRowHelper {
@@ -235,20 +246,29 @@ impl SparseReadRowHelper {
             // Safety: Id comes from primary key.
             let column = metadata.column_by_id(*pk_column_id).unwrap();
             let index = name_to_index.get(&column.column_schema.name);
-            indices.push(index.copied());
+            indices.push(ValueIndex {
+                column_id: *pk_column_id,
+                index: index.copied(),
+            });
         }
         // Get timestamp index.
         // Safety: time index must exist
         let ts_index = name_to_index
             .get(&metadata.time_index_column().column_schema.name)
             .unwrap();
-        indices.push(Some(*ts_index));
+        indices.push(ValueIndex {
+            column_id: metadata.time_index_column().column_id,
+            index: Some(*ts_index),
+        });
 
         // Iterate columns and find field columns.
         for column in metadata.field_columns() {
             // Get index in request for each field column.
             let index = name_to_index.get(&column.column_schema.name);
-            indices.push(index.copied());
+            indices.push(ValueIndex {
+                column_id: column.column_id,
+                index: index.copied(),
+            });
         }
 
         SparseReadRowHelper {
@@ -345,7 +365,7 @@ mod tests {
 
             assert_eq!(expect_ts, kv.timestamp());
             let expect_keys: Vec<_> = keys.iter().map(|k| ValueRef::from(*k)).collect();
-            let actual_keys: Vec<_> = kv.primary_keys().collect();
+            let actual_keys: Vec<_> = kv.primary_keys().map(|(_, v)| v).collect();
             assert_eq!(expect_keys, actual_keys);
             let expect_values: Vec<_> = values.iter().map(|v| ValueRef::from(*v)).collect();
             let actual_values: Vec<_> = kv.fields().collect();

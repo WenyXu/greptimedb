@@ -424,10 +424,10 @@ struct SparseEncoder {
 impl SparseEncoder {
     fn encode_to_vec<'a, I>(&self, row: I, buffer: &mut Vec<u8>) -> Result<()>
     where
-        I: Iterator<Item = ValueRef<'a>>,
+        I: Iterator<Item = (ColumnId, ValueRef<'a>)>,
     {
         let mut serializer = Serializer::new(buffer);
-        for (value, field) in row.zip(self.fields.iter()) {
+        for ((_, value), field) in row.zip(self.fields.iter()) {
             if !value.is_null() {
                 field
                     .column_id

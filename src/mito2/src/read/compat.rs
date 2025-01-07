@@ -26,7 +26,7 @@ use store_api::storage::ColumnId;
 use crate::error::{CompatReaderSnafu, CreateDefaultSnafu, Result};
 use crate::read::projection::ProjectionMapper;
 use crate::read::{Batch, BatchColumn, BatchReader};
-use crate::row_converter::{McmpRowCodec, RowCodec, SortField};
+use crate::row_converter::{CompositeRowCodec, CompositeValues, RowCodec, SortField};
 
 /// Reader to adapt schema of underlying reader to expected schema.
 pub struct CompatReader<R> {
@@ -127,9 +127,9 @@ pub(crate) fn has_same_columns(left: &RegionMetadata, right: &RegionMetadata) ->
 #[derive(Debug)]
 struct CompatPrimaryKey {
     /// Row converter to append values to primary keys.
-    converter: McmpRowCodec,
+    converter: CompositeRowCodec,
     /// Default values to append.
-    values: Vec<Value>,
+    values: Vec<(ColumnId, Value)>,
 }
 
 impl CompatPrimaryKey {
@@ -139,7 +139,9 @@ impl CompatPrimaryKey {
             Vec::with_capacity(batch.primary_key().len() + self.converter.estimated_size());
         buffer.extend_from_slice(batch.primary_key());
         self.converter.encode_to_vec(
-            self.values.iter().map(|value| value.as_value_ref()),
+            self.values
+                .iter()
+                .map(|(id, value)| (*id, value.as_value_ref())),
             &mut buffer,
         )?;
 
@@ -147,8 +149,17 @@ impl CompatPrimaryKey {
 
         // update cache
         if let Some(pk_values) = &mut batch.pk_values {
-            for value in &self.values {
-                pk_values.push(value.clone());
+            match pk_values {
+                CompositeValues::Dense(values) => {
+                    for (_, value) in &self.values {
+                        values.push(value.clone());
+                    }
+                }
+                CompositeValues::Sparse(sprase_value) => {
+                    for (column_id, value) in &self.values {
+                        sprase_value.insert(*column_id, value.clone());
+                    }
+                }
             }
         }
 
@@ -251,7 +262,10 @@ fn may_compat_primary_key(
     for column_id in to_add {
         // Safety: The id comes from expect region metadata.
         let column = expect.column_by_id(*column_id).unwrap();
-        fields.push(SortField::new(column.column_schema.data_type.clone()));
+        fields.push((
+            *column_id,
+            SortField::new(column.column_schema.data_type.clone()),
+        ));
         let default_value = column
             .column_schema
             .create_default()
@@ -266,10 +280,9 @@ fn may_compat_primary_key(
                     column.column_schema.name
                 ),
             })?;
-        values.push(default_value);
+        values.push((*column_id, default_value));
     }
-    let converter = McmpRowCodec::new(fields);
-
+    let converter = CompositeRowCodec::new_partial_fields(actual.primary_key_encoding, fields);
     Ok(Some(CompatPrimaryKey { converter, values }))
 }
 
@@ -366,6 +379,7 @@ mod tests {
     use store_api::storage::RegionId;
 
     use super::*;
+    use crate::row_converter::McmpRowCodec;
     use crate::test_util::{check_reader_result, VecBatchReader};
 
     /// Creates a new [RegionMetadata].
@@ -406,7 +420,7 @@ mod tests {
             None => ValueRef::Null,
         });
 
-        converter.encode(row).unwrap()
+        converter.encode(row.map(|v| (0, v))).unwrap()
     }
 
     /// Creates a batch for specific primary `key`.

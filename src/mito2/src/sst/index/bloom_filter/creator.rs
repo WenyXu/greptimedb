@@ -108,7 +108,7 @@ impl BloomFilterIndexer {
             return Ok(None);
         }
 
-        let codec = IndexValuesCodec::from_tag_columns(metadata.primary_key_columns());
+        let codec = IndexValuesCodec::from_tag_columns(metadata);
         let indexer = Self {
             creators,
             temp_file_provider,
@@ -193,10 +193,11 @@ impl BloomFilterIndexer {
         guard.inc_row_count(n);
 
         // Tags
-        for ((col_id, _), field, value) in self.codec.decode(batch.primary_key())? {
-            let Some(creator) = self.creators.get_mut(col_id) else {
+        for (col_id, value) in self.codec.decode(batch.primary_key())? {
+            let Some(creator) = self.creators.get_mut(&col_id) else {
                 continue;
             };
+            let (_, field) = self.codec.field_encoder(&col_id).unwrap();
             let elems = value
                 .map(|v| {
                     let mut buf = vec![];
@@ -414,7 +415,7 @@ pub(crate) mod tests {
         let fields = vec![SortField::new(ConcreteDataType::string_datatype())];
         let codec = McmpRowCodec::new(fields);
         let row: [ValueRef; 1] = [str_tag.as_ref().into()];
-        let primary_key = codec.encode(row.into_iter()).unwrap();
+        let primary_key = codec.encode(row.into_iter().map(|v| (1, v))).unwrap();
 
         let u64_field = BatchColumn {
             column_id: 3,

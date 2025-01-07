@@ -576,7 +576,7 @@ fn prune_primary_key(
     let pk_values = if let Some(pk_values) = series.pk_cache.as_ref() {
         pk_values
     } else {
-        let pk_values = codec.decode(pk);
+        let pk_values = codec.decode_values(pk);
         if let Err(e) = pk_values {
             error!(e; "Failed to decode primary key");
             return true;

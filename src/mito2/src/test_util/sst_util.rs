@@ -89,7 +89,7 @@ pub fn new_primary_key(tags: &[&str]) -> Vec<u8> {
         .collect();
     let converter = McmpRowCodec::new(fields);
     converter
-        .encode(tags.iter().map(|tag| ValueRef::String(tag)))
+        .encode(tags.iter().map(|tag| (0, ValueRef::String(tag))))
         .unwrap()
 }
 

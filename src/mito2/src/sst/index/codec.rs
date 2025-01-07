@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use datatypes::data_type::ConcreteDataType;
 use datatypes::value::{Value, ValueRef};
 use memcomparable::Serializer;
 use snafu::{ensure, OptionExt, ResultExt};
-use store_api::metadata::ColumnMetadata;
+use store_api::metadata::RegionMetadataRef;
 use store_api::storage::ColumnId;
 
 use crate::error::{FieldTypeMismatchSnafu, IndexEncodeNullSnafu, Result};
-use crate::row_converter::{McmpRowCodec, RowCodec, SortField};
+use crate::row_converter::{CompositeRowCodec, CompositeValues, RowCodec, SortField};
 
 /// Encodes index values according to their data types for sorting and storage use.
 pub struct IndexValueCodec;
@@ -60,65 +62,87 @@ impl IndexValueCodec {
 
 /// Decodes primary key values into their corresponding column ids, data types and values.
 pub struct IndexValuesCodec {
-    /// Tuples containing column id and its corresponding index_name (result of `to_string` on ColumnId),
-    /// to minimize redundant `to_string` calls.
-    column_ids: Vec<(ColumnId, String)>,
-    /// The data types of tag columns.
-    fields: Vec<SortField>,
     /// The decoder for the primary key.
-    decoder: McmpRowCodec,
+    decoder: CompositeRowCodec,
+    /// The data types of tag columns.
+    fields: HashMap<ColumnId, (String, SortField)>,
+    /// The ordered list of primary keys.
+    ordered_fields: Vec<ColumnId>,
 }
 
 impl IndexValuesCodec {
     /// Creates a new `IndexValuesCodec` from a list of `ColumnMetadata` of tag columns.
-    pub fn from_tag_columns<'a>(tag_columns: impl Iterator<Item = &'a ColumnMetadata>) -> Self {
-        let (column_ids, fields): (Vec<_>, Vec<_>) = tag_columns
+    pub fn from_tag_columns(region_metadata: &RegionMetadataRef) -> Self {
+        let decoder = CompositeRowCodec::new(region_metadata);
+        let fields = region_metadata
+            .primary_key_columns()
             .map(|column| {
                 (
-                    (column.column_id, column.column_id.to_string()),
-                    SortField::new(column.column_schema.data_type.clone()),
+                    column.column_id,
+                    (
+                        column.column_id.to_string(),
+                        SortField::new(column.column_schema.data_type.clone()),
+                    ),
                 )
             })
-            .unzip();
+            .collect::<HashMap<_, _>>();
 
-        let decoder = McmpRowCodec::new(fields.clone());
         Self {
-            column_ids,
-            fields,
             decoder,
+            fields,
+            ordered_fields: region_metadata.primary_key.clone(),
         }
+    }
+
+    /// Returns the encoder for the given column id.
+    pub fn field_encoder(&self, column_id: &ColumnId) -> Option<&(String, SortField)> {
+        self.fields.get(column_id)
     }
 
     /// Decodes a primary key into its corresponding column ids, data types and values.
     pub fn decode(
         &self,
         primary_key: &[u8],
-    ) -> Result<impl Iterator<Item = (&(ColumnId, String), &SortField, Option<Value>)>> {
+    ) -> Result<Box<dyn Iterator<Item = (ColumnId, Option<Value>)> + Send + '_>> {
         let values = self.decoder.decode(primary_key)?;
+        match values {
+            CompositeValues::Dense(values) => {
+                let iter =
+                    values
+                        .into_iter()
+                        .zip(&self.ordered_fields)
+                        .map(|(value, column_id)| {
+                            if value.is_null() {
+                                (*column_id, None) 
+                            } else {
+                                (*column_id, Some(value))
+                            }
+                        });
 
-        let iter = values
-            .into_iter()
-            .zip(&self.column_ids)
-            .zip(&self.fields)
-            .map(|((value, column_id), encoder)| {
-                if value.is_null() {
-                    (column_id, encoder, None)
-                } else {
-                    (column_id, encoder, Some(value))
-                }
-            });
-
-        Ok(iter)
+                Ok(Box::new(iter))
+            }
+            CompositeValues::Sparse(values) => {
+                let iter = values
+                    .into_iter()
+                    .map(|(column_id, value)| (column_id, Some(value)));
+                Ok(Box::new(iter))
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use datatypes::data_type::ConcreteDataType;
     use datatypes::schema::ColumnSchema;
+    use store_api::metadata::{ColumnMetadata, RegionMetadataBuilder};
+    use store_api::storage::RegionId;
 
     use super::*;
     use crate::error::Error;
+    use crate::row_converter::McmpRowCodec;
 
     #[test]
     fn test_encode_value_basic() {
@@ -152,37 +176,50 @@ mod tests {
 
     #[test]
     fn test_decode_primary_key_basic() {
-        let tag_columns = vec![
-            ColumnMetadata {
-                column_schema: ColumnSchema::new("tag0", ConcreteDataType::string_datatype(), true),
-                semantic_type: api::v1::SemanticType::Tag,
-                column_id: 1,
-            },
-            ColumnMetadata {
-                column_schema: ColumnSchema::new("tag1", ConcreteDataType::int64_datatype(), false),
-                semantic_type: api::v1::SemanticType::Tag,
-                column_id: 2,
-            },
-        ];
-
         let primary_key = McmpRowCodec::new(vec![
             SortField::new(ConcreteDataType::string_datatype()),
             SortField::new(ConcreteDataType::int64_datatype()),
         ])
-        .encode([ValueRef::Null, ValueRef::Int64(10)].into_iter())
+        .encode([(1, ValueRef::Null), (2, ValueRef::Int64(10))].into_iter())
         .unwrap();
 
-        let codec = IndexValuesCodec::from_tag_columns(tag_columns.iter());
+        let mut builder = RegionMetadataBuilder::new(RegionId::new(1, 1));
+        builder
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new("tag0", ConcreteDataType::string_datatype(), true),
+                semantic_type: api::v1::SemanticType::Tag,
+                column_id: 1,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new("tag1", ConcreteDataType::int64_datatype(), false),
+                semantic_type: api::v1::SemanticType::Tag,
+                column_id: 2,
+            })
+            .push_column_metadata(ColumnMetadata {
+                column_schema: ColumnSchema::new(
+                    "ts",
+                    ConcreteDataType::timestamp_nanosecond_datatype(),
+                    false,
+                ),
+                semantic_type: api::v1::SemanticType::Timestamp,
+                column_id: 3,
+            })
+            .primary_key(vec![1, 2]);
+        let region_metadata = Arc::new(builder.build().unwrap());
+
+        let codec = IndexValuesCodec::from_tag_columns(&region_metadata);
         let mut iter = codec.decode(&primary_key).unwrap();
 
-        let ((column_id, col_id_str), field, value) = iter.next().unwrap();
-        assert_eq!(*column_id, 1);
+        let (column_id, value) = iter.next().unwrap();
+        assert_eq!(column_id, 1);
+        let (col_id_str, field) = codec.field_encoder(&1).unwrap();
         assert_eq!(col_id_str, "1");
         assert_eq!(field, &SortField::new(ConcreteDataType::string_datatype()));
         assert_eq!(value, None);
 
-        let ((column_id, col_id_str), field, value) = iter.next().unwrap();
-        assert_eq!(*column_id, 2);
+        let (column_id, value) = iter.next().unwrap();
+        assert_eq!(column_id, 2);
+        let (col_id_str, field) = codec.field_encoder(&2).unwrap();
         assert_eq!(col_id_str, "2");
         assert_eq!(field, &SortField::new(ConcreteDataType::int64_datatype()));
         assert_eq!(value, Some(Value::Int64(10)));

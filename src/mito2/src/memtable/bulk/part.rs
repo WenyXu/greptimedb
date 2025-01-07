@@ -580,7 +580,10 @@ mod tests {
         assert_eq!(expected.len(), batch_values.len());
 
         for idx in 0..expected.len() {
-            assert_eq!(expected[idx].pk_values, &batch_values[idx].0);
+            assert_eq!(
+                expected[idx].pk_values,
+                &batch_values[idx].0.clone().into_dense()
+            );
             assert_eq!(expected[idx].timestamps, &batch_values[idx].1);
             assert_eq!(expected[idx].v1, &batch_values[idx].2);
         }

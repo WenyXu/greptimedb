@@ -760,7 +760,7 @@ mod tests {
 
         let mut reader = new_memtable.iter(None, None).unwrap();
         let batch = reader.next().unwrap().unwrap();
-        let pk = codec.decode(batch.primary_key()).unwrap();
+        let pk = codec.decode(batch.primary_key()).unwrap().into_dense();
         if let Value::String(s) = &pk[2] {
             assert_eq!("10min", s.as_utf8());
         } else {

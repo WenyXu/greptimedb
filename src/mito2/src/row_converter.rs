@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use bytes::Buf;
 use common_base::bytes::Bytes;
 use common_decimal::Decimal128;
@@ -25,29 +27,42 @@ use memcomparable::{Deserializer, Serializer};
 use paste::paste;
 use serde::{Deserialize, Serialize};
 use snafu::ResultExt;
-use store_api::metadata::RegionMetadata;
+use store_api::codec::PrimaryKeyEncoding;
+use store_api::metadata::{RegionMetadata, RegionMetadataRef};
+use store_api::storage::ColumnId;
 
 use crate::error;
 use crate::error::{FieldTypeMismatchSnafu, NotSupportedFieldSnafu, Result, SerializeFieldSnafu};
 
+pub trait LeftMostValueDecoder {
+    fn decode_leftmost(&self, bytes: &[u8]) -> Result<Option<Value>>;
+}
+
 /// Row value encoder/decoder.
-pub trait RowCodec {
+pub trait RowCodec: Send + Sync {
     /// Encodes rows to bytes.
     /// # Note
     /// Ensure the length of row iterator matches the length of fields.
     fn encode<'a, I>(&self, row: I) -> Result<Vec<u8>>
     where
-        I: Iterator<Item = ValueRef<'a>>;
+        I: Iterator<Item = (ColumnId, ValueRef<'a>)>,
+    {
+        let mut buffer = Vec::new();
+        self.encode_to_vec(row, &mut buffer)?;
+        Ok(buffer)
+    }
 
     /// Encodes rows to specific vec.
     /// # Note
     /// Ensure the length of row iterator matches the length of fields.
     fn encode_to_vec<'a, I>(&self, row: I, buffer: &mut Vec<u8>) -> Result<()>
     where
-        I: Iterator<Item = ValueRef<'a>>;
+        I: Iterator<Item = (ColumnId, ValueRef<'a>)>;
 
     /// Decode row values from bytes.
-    fn decode(&self, bytes: &[u8]) -> Result<Vec<Value>>;
+    fn decode(&self, bytes: &[u8]) -> Result<CompositeValues>;
+
+    fn estimated_size(&self) -> usize;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -316,6 +331,263 @@ impl SortField {
     }
 }
 
+pub enum CompositeLeftMostValueDecoder {
+    Full(McmpRowCodec),
+    Sparse(LeftMostSparseRowCodec),
+}
+
+impl CompositeLeftMostValueDecoder {
+    pub fn new(primary_key_encoding: PrimaryKeyEncoding, data_type: ConcreteDataType) -> Self {
+        match primary_key_encoding {
+            PrimaryKeyEncoding::Full => {
+                Self::Full(McmpRowCodec::new(vec![SortField::new(data_type)]))
+            }
+            PrimaryKeyEncoding::Sparse => Self::Sparse(LeftMostSparseRowCodec::new(data_type)),
+        }
+    }
+}
+
+impl LeftMostValueDecoder for CompositeLeftMostValueDecoder {
+    fn decode_leftmost(&self, bytes: &[u8]) -> Result<Option<Value>> {
+        match self {
+            CompositeLeftMostValueDecoder::Full(decoder) => decoder.decode_leftmost(bytes),
+            CompositeLeftMostValueDecoder::Sparse(decoder) => decoder.decode_leftmost(bytes),
+        }
+    }
+}
+
+pub struct LeftMostSparseRowCodec {
+    leftmost_field: SortField,
+}
+
+impl LeftMostSparseRowCodec {
+    pub fn new(data_type: ConcreteDataType) -> Self {
+        Self {
+            leftmost_field: SortField::new(data_type),
+        }
+    }
+}
+
+impl LeftMostValueDecoder for LeftMostSparseRowCodec {
+    fn decode_leftmost(&self, bytes: &[u8]) -> Result<Option<Value>> {
+        let mut deserializer = Deserializer::new(bytes);
+        let _ = u32::deserialize(&mut deserializer).unwrap();
+        let value = self.leftmost_field.deserialize(&mut deserializer)?;
+        Ok(Some(value))
+    }
+}
+
+impl LeftMostValueDecoder for McmpRowCodec {
+    fn decode_leftmost(&self, bytes: &[u8]) -> Result<Option<Value>> {
+        let mut values = self.decode_values(bytes)?;
+        Ok(values.pop())
+    }
+}
+
+/// A composite row codec that can be either full or sparse.
+#[derive(Debug)]
+pub enum CompositeRowCodec {
+    Full(McmpRowCodec),
+    Sparse(SparseRowCodec),
+}
+
+impl CompositeRowCodec {
+    pub fn new(region_metadata: &RegionMetadataRef) -> Self {
+        match region_metadata.primary_key_encoding {
+            PrimaryKeyEncoding::Full => {
+                Self::Full(McmpRowCodec::new_with_primary_keys(region_metadata))
+            }
+            PrimaryKeyEncoding::Sparse => Self::Sparse(SparseRowCodec::new(region_metadata)),
+        }
+    }
+
+    pub fn new_partial_fields(
+        primary_key_encoding: PrimaryKeyEncoding,
+        fields: Vec<(ColumnId, SortField)>,
+    ) -> Self {
+        match primary_key_encoding {
+            PrimaryKeyEncoding::Full => Self::Full(McmpRowCodec::new(
+                fields.into_iter().map(|(_, f)| f).collect(),
+            )),
+            PrimaryKeyEncoding::Sparse => Self::Sparse(SparseRowCodec::new_partial_fields(fields)),
+        }
+    }
+
+    pub fn empty_composite_values(&self) -> CompositeValues {
+        match self {
+            CompositeRowCodec::Full(_) => CompositeValues::Dense(Vec::new()),
+            CompositeRowCodec::Sparse(_) => {
+                CompositeValues::Sparse(SparseValue::new(HashMap::new()))
+            }
+        }
+    }
+
+    pub fn is_sparse(&self) -> bool {
+        matches!(self, CompositeRowCodec::Sparse(_))
+    }
+}
+
+impl RowCodec for CompositeRowCodec {
+    fn encode_to_vec<'a, I>(&self, row: I, buffer: &mut Vec<u8>) -> Result<()>
+    where
+        I: Iterator<Item = (ColumnId, ValueRef<'a>)>,
+    {
+        match self {
+            CompositeRowCodec::Full(codec) => codec.encode_to_vec(row, buffer),
+            CompositeRowCodec::Sparse(codec) => codec.encode_to_vec(row, buffer),
+        }
+    }
+
+    fn decode(&self, bytes: &[u8]) -> Result<CompositeValues> {
+        match self {
+            CompositeRowCodec::Full(codec) => codec.decode(bytes),
+            CompositeRowCodec::Sparse(codec) => codec.decode(bytes),
+        }
+    }
+
+    fn estimated_size(&self) -> usize {
+        match self {
+            CompositeRowCodec::Full(codec) => codec.estimated_size(),
+            CompositeRowCodec::Sparse(codec) => codec.estimated_size(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SparseRowCodec {
+    table_id_decoder: SortField,
+    tsid_decoder: SortField,
+    label_decoder: SortField,
+    fields: HashMap<ColumnId, SortField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SparseValue {
+    values: HashMap<ColumnId, Value>,
+}
+
+impl IntoIterator for SparseValue {
+    type Item = (ColumnId, Value);
+    type IntoIter = std::collections::hash_map::IntoIter<ColumnId, Value>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.values.into_iter()
+    }
+}
+
+impl SparseValue {
+    /// Creates a new [`SpraseValue`] instance.
+    pub fn new(values: HashMap<ColumnId, Value>) -> Self {
+        Self { values }
+    }
+
+    /// Returns the value of the given column, or [`Value::Null`] if the column is not present.
+    pub fn get_or_null(&self, column_id: ColumnId) -> &Value {
+        self.values.get(&column_id).unwrap_or(&Value::Null)
+    }
+
+    /// Inserts a new value into the [`SpraseValue`].
+    pub fn insert(&mut self, column_id: ColumnId, value: Value) {
+        self.values.insert(column_id, value);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompositeValues {
+    Dense(Vec<Value>),
+    Sparse(SparseValue),
+}
+
+#[cfg(test)]
+impl CompositeValues {
+    pub fn into_sparse(self) -> SparseValue {
+        match self {
+            CompositeValues::Sparse(v) => v,
+            _ => panic!("CompositeValues is not sparse"),
+        }
+    }
+
+    pub fn into_dense(self) -> Vec<Value> {
+        match self {
+            CompositeValues::Dense(v) => v,
+            _ => panic!("CompositeValues is not dense"),
+        }
+    }
+}
+
+impl SparseRowCodec {
+    pub fn new(region_metadata: &RegionMetadataRef) -> Self {
+        Self {
+            table_id_decoder: SortField::new(ConcreteDataType::uint32_datatype()),
+            tsid_decoder: SortField::new(ConcreteDataType::uint64_datatype()),
+            label_decoder: SortField::new(ConcreteDataType::string_datatype()),
+            fields: region_metadata
+                .primary_key_columns()
+                .map(|c| {
+                    (
+                        c.column_id,
+                        SortField::new(c.column_schema.data_type.clone()),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn new_partial_fields(fields: Vec<(ColumnId, SortField)>) -> Self {
+        Self {
+            table_id_decoder: SortField::new(ConcreteDataType::uint32_datatype()),
+            tsid_decoder: SortField::new(ConcreteDataType::uint64_datatype()),
+            label_decoder: SortField::new(ConcreteDataType::string_datatype()),
+            fields: fields.into_iter().collect(),
+        }
+    }
+}
+
+impl RowCodec for SparseRowCodec {
+    fn encode_to_vec<'a, I>(&self, row: I, buffer: &mut Vec<u8>) -> Result<()>
+    where
+        I: Iterator<Item = (ColumnId, ValueRef<'a>)>,
+    {
+        let mut serializer = Serializer::new(buffer);
+        for (column_id, value) in row {
+            if !value.is_null() {
+                if let Some(field) = &self.fields.get(&column_id) {
+                    column_id
+                        .serialize(&mut serializer)
+                        .context(SerializeFieldSnafu)?;
+                    field.serialize(&mut serializer, &value)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn decode(&self, bytes: &[u8]) -> Result<CompositeValues> {
+        let mut deserializer = Deserializer::new(bytes);
+        let mut values = SparseValue::new(HashMap::new());
+
+        let column_id = u32::deserialize(&mut deserializer).unwrap();
+        let value = self.table_id_decoder.deserialize(&mut deserializer)?;
+        values.insert(column_id, value);
+
+        let column_id = u32::deserialize(&mut deserializer).unwrap();
+        let value = self.tsid_decoder.deserialize(&mut deserializer)?;
+        values.insert(column_id, value);
+        while deserializer.has_remaining() {
+            let column_id = u32::deserialize(&mut deserializer).unwrap();
+            let value = self.label_decoder.deserialize(&mut deserializer)?;
+            values.insert(column_id, value);
+        }
+
+        Ok(CompositeValues::Sparse(values))
+    }
+
+    fn estimated_size(&self) -> usize {
+        self.fields.len() * 4 + 16
+    }
+}
+
 /// A memory-comparable row [Value] encoder/decoder.
 #[derive(Debug)]
 pub struct McmpRowCodec {
@@ -391,38 +663,39 @@ impl McmpRowCodec {
 
         self.fields[pos].deserialize(&mut deserializer)
     }
-}
 
-impl RowCodec for McmpRowCodec {
-    fn encode<'a, I>(&self, row: I) -> Result<Vec<u8>>
-    where
-        I: Iterator<Item = ValueRef<'a>>,
-    {
-        let mut buffer = Vec::new();
-        self.encode_to_vec(row, &mut buffer)?;
-        Ok(buffer)
-    }
-
-    fn encode_to_vec<'a, I>(&self, row: I, buffer: &mut Vec<u8>) -> Result<()>
-    where
-        I: Iterator<Item = ValueRef<'a>>,
-    {
-        buffer.reserve(self.estimated_size());
-        let mut serializer = Serializer::new(buffer);
-        for (value, field) in row.zip(self.fields.iter()) {
-            field.serialize(&mut serializer, &value)?;
-        }
-        Ok(())
-    }
-
-    fn decode(&self, bytes: &[u8]) -> Result<Vec<Value>> {
+    pub fn decode_values(&self, bytes: &[u8]) -> Result<Vec<Value>> {
         let mut deserializer = Deserializer::new(bytes);
         let mut values = Vec::with_capacity(self.fields.len());
         for f in &self.fields {
             let value = f.deserialize(&mut deserializer)?;
             values.push(value);
         }
+
         Ok(values)
+    }
+}
+
+impl RowCodec for McmpRowCodec {
+    fn encode_to_vec<'a, I>(&self, row: I, buffer: &mut Vec<u8>) -> Result<()>
+    where
+        I: Iterator<Item = (ColumnId, ValueRef<'a>)>,
+    {
+        buffer.reserve(self.estimated_size());
+        let mut serializer = Serializer::new(buffer);
+        for ((_, value), field) in row.zip(self.fields.iter()) {
+            field.serialize(&mut serializer, &value)?;
+        }
+        Ok(())
+    }
+
+    fn decode(&self, bytes: &[u8]) -> Result<CompositeValues> {
+        let values = self.decode_values(bytes)?;
+        Ok(CompositeValues::Dense(values))
+    }
+
+    fn estimated_size(&self) -> usize {
+        self.fields.iter().map(|f| f.estimated_size()).sum()
     }
 }
 
@@ -444,10 +717,14 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
 
-        let value_ref = row.iter().map(|v| v.as_value_ref()).collect::<Vec<_>>();
+        let value_ref = row
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (i as u32, v.as_value_ref()))
+            .collect::<Vec<_>>();
 
         let result = encoder.encode(value_ref.iter().cloned()).unwrap();
-        let decoded = encoder.decode(&result).unwrap();
+        let decoded = encoder.decode(&result).unwrap().into_dense();
         assert_eq!(decoded, row);
         let mut decoded = Vec::new();
         let mut offsets = Vec::new();
@@ -470,10 +747,13 @@ mod tests {
             SortField::new(ConcreteDataType::int64_datatype()),
         ]);
         let values = [Value::String("abcdefgh".into()), Value::Int64(128)];
-        let value_ref = values.iter().map(|v| v.as_value_ref()).collect::<Vec<_>>();
+        let value_ref = values
+            .iter()
+            .map(|v| (0, v.as_value_ref()))
+            .collect::<Vec<_>>();
         let result = encoder.encode(value_ref.iter().cloned()).unwrap();
 
-        let decoded = encoder.decode(&result).unwrap();
+        let decoded = encoder.decode(&result).unwrap().into_dense();
         assert_eq!(&values, &decoded as &[Value]);
     }
 
