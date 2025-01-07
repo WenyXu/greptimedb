@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::any::Any;
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use common_telemetry::{debug, info};
@@ -185,7 +184,9 @@ impl PgStore {
 
     async fn get_txn_executor<'a>(&self, client: &'a mut PgClient) -> Result<PgQueryExecutor<'a>> {
         let txn = client
-            .transaction()
+            .build_transaction()
+            .isolation_level(tokio_postgres::IsolationLevel::Serializable)
+            .start()
             .await
             .context(PostgresTransactionSnafu {
                 operation: "start".to_string(),
