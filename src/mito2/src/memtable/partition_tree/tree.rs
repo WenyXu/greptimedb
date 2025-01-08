@@ -138,10 +138,9 @@ impl PartitionTree {
             pk_buffer.clear();
             if self.is_partitioned {
                 // Use sparse encoder for metric engine.
-                self.sparse_encoder
-                    .encode_to_vec(kv.primary_keys(), pk_buffer)?;
+                kv.encode_primary_key(self.sparse_encoder.as_ref(), pk_buffer)?;
             } else {
-                self.row_codec.encode_to_vec(kv.primary_keys(), pk_buffer)?;
+                kv.encode_primary_key(self.row_codec.as_ref(), pk_buffer)?;
             }
 
             // Write rows with
@@ -188,10 +187,9 @@ impl PartitionTree {
         pk_buffer.clear();
         if self.is_partitioned {
             // Use sparse encoder for metric engine.
-            self.sparse_encoder
-                .encode_to_vec(kv.primary_keys(), pk_buffer)?;
+            kv.encode_primary_key(self.sparse_encoder.as_ref(), pk_buffer)?;
         } else {
-            self.row_codec.encode_to_vec(kv.primary_keys(), pk_buffer)?;
+            kv.encode_primary_key(self.row_codec.as_ref(), pk_buffer)?;
         }
 
         // Write rows with
@@ -421,7 +419,7 @@ struct SparseEncoder {
     fields: Vec<FieldWithId>,
 }
 
-impl SparseEncoder {
+impl RowCodec for SparseEncoder {
     fn encode_to_vec<'a, I>(&self, row: I, buffer: &mut Vec<u8>) -> Result<()>
     where
         I: Iterator<Item = (ColumnId, ValueRef<'a>)>,
@@ -437,6 +435,14 @@ impl SparseEncoder {
             }
         }
         Ok(())
+    }
+
+    fn decode(&self, _bytes: &[u8]) -> Result<crate::row_converter::CompositeValues> {
+        todo!()
+    }
+
+    fn estimated_size(&self) -> usize {
+        self.fields.iter().map(|f| f.field.estimated_size()).sum()
     }
 }
 

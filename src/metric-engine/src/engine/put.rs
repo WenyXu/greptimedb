@@ -18,12 +18,16 @@ use api::v1::value::ValueData;
 use api::v1::{ColumnDataType, ColumnSchema, Row, Rows, SemanticType};
 use common_telemetry::{error, info};
 use snafu::{ensure, OptionExt};
+use store_api::codec::PrimaryKeyEncoding;
 use store_api::metric_engine_consts::{
     DATA_SCHEMA_TABLE_ID_COLUMN_NAME, DATA_SCHEMA_TSID_COLUMN_NAME,
 };
+use store_api::region_engine::WriteHint;
 use store_api::region_request::{AffectedRows, RegionPutRequest};
 use store_api::storage::{RegionId, TableId};
 
+use super::state::primary_key_encoding;
+use crate::codec::{CodecRef, RowsIter};
 use crate::engine::MetricEngineInner;
 use crate::error::{
     ColumnNotFoundSnafu, ForbiddenPhysicalAlterSnafu, LogicalRegionNotFoundSnafu,
@@ -79,6 +83,15 @@ impl MetricEngineInner {
             .with_context(|| LogicalRegionNotFoundSnafu {
                 region_id: logical_region_id,
             })?;
+        let codec = self
+            .state
+            .read()
+            .unwrap()
+            .get_region_codec(logical_region_id)
+            .with_context(|| LogicalRegionNotFoundSnafu {
+                region_id: logical_region_id,
+            })?
+            .clone();
         let data_region_id = to_data_region_id(physical_region_id);
 
         self.verify_put_request(logical_region_id, physical_region_id, &request)
@@ -87,7 +100,10 @@ impl MetricEngineInner {
         // write to data region
 
         // TODO: retrieve table name
-        self.modify_rows(logical_region_id.table_id(), &mut request.rows)?;
+        self.modify_rows(logical_region_id.table_id(), &mut request.rows, &codec)?;
+        if primary_key_encoding() == PrimaryKeyEncoding::Sparse {
+            request.hint = WriteHint::PRIMARY_KEY_ENCODED | WriteHint::SPARSE_KEY_ENCODING;
+        }
         self.data_region.write_data(data_region_id, request).await
     }
 
@@ -137,7 +153,7 @@ impl MetricEngineInner {
     /// Perform metric engine specific logic to incoming rows.
     /// - Add table_id column
     /// - Generate tsid
-    fn modify_rows(&self, table_id: TableId, rows: &mut Rows) -> Result<()> {
+    fn modify_rows(&self, table_id: TableId, rows: &mut Rows, codec: &CodecRef) -> Result<()> {
         // gather tag column indices
         let tag_col_indices = rows
             .schema
@@ -174,7 +190,19 @@ impl MetricEngineInner {
             Self::fill_internal_columns(table_id, &tag_col_indices, row);
         }
 
+        if primary_key_encoding() == PrimaryKeyEncoding::Sparse {
+            let input = std::mem::take(rows);
+            let encoded = self.encode_primary_key(codec, input)?;
+            *rows = encoded;
+        }
+
         Ok(())
+    }
+
+    fn encode_primary_key(&self, codec: &CodecRef, rows: Rows) -> Result<Rows> {
+        let iter = RowsIter::new(rows, &codec.region_metadata);
+        let encoded = codec.encode_rows(iter)?;
+        Ok(encoded)
     }
 
     /// Fills internal columns of a row with table name and a hash of tag values.
@@ -185,10 +213,10 @@ impl MetricEngineInner {
     ) {
         let mut hasher = mur3::Hasher128::with_seed(TSID_HASH_SEED);
         for (idx, name) in tag_col_indices {
-            let tag = row.values[*idx].clone();
+            let tag = &row.values[*idx];
             name.hash(&mut hasher);
             // The type is checked before. So only null is ignored.
-            if let Some(ValueData::StringValue(string)) = tag.value_data {
+            if let Some(ValueData::StringValue(string)) = &tag.value_data {
                 string.hash(&mut hasher);
             }
         }
@@ -204,7 +232,7 @@ impl MetricEngineInner {
 #[cfg(test)]
 mod tests {
     use common_recordbatch::RecordBatches;
-    use store_api::region_engine::RegionEngine;
+    use store_api::region_engine::{RegionEngine, WriteHint};
     use store_api::region_request::RegionRequest;
     use store_api::storage::ScanRequest;
 
@@ -221,6 +249,7 @@ mod tests {
         let rows = test_util::build_rows(1, 5);
         let request = RegionRequest::Put(RegionPutRequest {
             rows: Rows { schema, rows },
+            hint: WriteHint::empty(),
         });
 
         // write data
@@ -294,6 +323,7 @@ mod tests {
         let rows = test_util::build_rows(3, 100);
         let request = RegionRequest::Put(RegionPutRequest {
             rows: Rows { schema, rows },
+            hint: WriteHint::empty(),
         });
 
         // write data
@@ -315,6 +345,7 @@ mod tests {
         let rows = test_util::build_rows(1, 100);
         let request = RegionRequest::Put(RegionPutRequest {
             rows: Rows { schema, rows },
+            hint: WriteHint::empty(),
         });
 
         engine
@@ -334,6 +365,7 @@ mod tests {
         let rows = test_util::build_rows(1, 100);
         let request = RegionRequest::Put(RegionPutRequest {
             rows: Rows { schema, rows },
+            hint: WriteHint::empty(),
         });
 
         engine

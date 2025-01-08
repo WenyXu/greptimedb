@@ -43,4 +43,8 @@ pub fn set_data_region_options(options: &mut HashMap<String, String>) {
     );
     // Set memtable options for the data region.
     options.insert("memtable.type".to_string(), "partition_tree".to_string());
+    options.insert(
+        "memtable.partition_tree.primary_key_encoding".to_string(),
+        "sparse".to_string(),
+    );
 }

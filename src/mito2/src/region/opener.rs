@@ -28,7 +28,7 @@ use snafu::{ensure, OptionExt, ResultExt};
 use store_api::logstore::provider::Provider;
 use store_api::logstore::LogStore;
 use store_api::metadata::{ColumnMetadata, RegionMetadata, RegionMetadataBuilder};
-use store_api::region_engine::RegionRole;
+use store_api::region_engine::{RegionRole, WriteHint};
 use store_api::storage::{ColumnId, RegionId};
 
 use crate::access_layer::AccessLayer;
@@ -218,6 +218,8 @@ impl RegionOpener {
             options.memtable.as_ref(),
             options.need_dedup(),
             options.merge_mode(),
+            // Use the primary key encoding in the metadata.
+            metadata.primary_key_encoding,
         );
         let part_duration = options.compaction.time_window();
         // Initial memtable id is 0.
@@ -350,6 +352,8 @@ impl RegionOpener {
             region_options.memtable.as_ref(),
             region_options.need_dedup(),
             region_options.merge_mode(),
+            // Use the primary key encoding in the metadata.
+            metadata.primary_key_encoding,
         );
         // Use compaction time window in the manifest if region doesn't provide
         // the time window option.
@@ -543,7 +547,14 @@ where
                 .as_ref()
                 .map(|rows| rows.rows.len())
                 .unwrap_or(0);
-            region_write_ctx.push_mutation(mutation.op_type, mutation.rows, OptionOutputTx::none());
+            let hint =
+                WriteHint::from_bits(mutation.write_hint as u8).unwrap_or(WriteHint::empty());
+            region_write_ctx.push_mutation(
+                mutation.op_type,
+                mutation.rows,
+                hint,
+                OptionOutputTx::none(),
+            );
         }
 
         // set next_entry_id and write to memtable.

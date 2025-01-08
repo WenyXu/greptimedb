@@ -31,7 +31,7 @@ use prost::Message;
 use smallvec::SmallVec;
 use snafu::{ensure, OptionExt, ResultExt};
 use store_api::metadata::{ColumnMetadata, RegionMetadata, RegionMetadataRef};
-use store_api::region_engine::{SetRegionRoleStateResponse, SettableRegionRoleState};
+use store_api::region_engine::{SetRegionRoleStateResponse, SettableRegionRoleState, WriteHint};
 use store_api::region_request::{
     AffectedRows, RegionAlterRequest, RegionCatchupRequest, RegionCloseRequest,
     RegionCompactRequest, RegionCreateRequest, RegionDropRequest, RegionFlushRequest,
@@ -63,6 +63,8 @@ pub struct WriteRequest {
     name_to_index: HashMap<String, usize>,
     /// Whether each column has null.
     has_null: Vec<bool>,
+    /// Write hint.
+    pub hint: WriteHint,
 }
 
 impl WriteRequest {
@@ -112,7 +114,13 @@ impl WriteRequest {
             rows,
             name_to_index,
             has_null,
+            hint: WriteHint::empty(),
         })
+    }
+
+    pub fn with_hint(mut self, hint: WriteHint) -> Self {
+        self.hint = hint;
+        self
     }
 
     /// Returns estimated size of the request.
@@ -540,7 +548,8 @@ impl WorkerRequest {
         let (sender, receiver) = oneshot::channel();
         let worker_request = match value {
             RegionRequest::Put(v) => {
-                let write_request = WriteRequest::new(region_id, OpType::Put, v.rows)?;
+                let write_request =
+                    WriteRequest::new(region_id, OpType::Put, v.rows)?.with_hint(v.hint);
                 WorkerRequest::Write(SenderWriteRequest {
                     sender: sender.into(),
                     request: write_request,

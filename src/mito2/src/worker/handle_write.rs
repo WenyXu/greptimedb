@@ -244,6 +244,7 @@ impl<S> RegionWorkerLoop<S> {
             region_ctx.push_mutation(
                 sender_req.request.op_type as i32,
                 Some(sender_req.request.rows),
+                sender_req.request.hint,
                 sender_req.sender,
             );
         }

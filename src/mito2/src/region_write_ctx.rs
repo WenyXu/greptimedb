@@ -19,6 +19,7 @@ use api::v1::{Mutation, OpType, Rows, WalEntry};
 use snafu::ResultExt;
 use store_api::logstore::provider::Provider;
 use store_api::logstore::LogStore;
+use store_api::region_engine::WriteHint;
 use store_api::storage::{RegionId, SequenceNumber};
 
 use crate::error::{Error, Result, WriteGroupSnafu};
@@ -131,13 +132,19 @@ impl RegionWriteCtx {
     }
 
     /// Push mutation to the context.
-    pub(crate) fn push_mutation(&mut self, op_type: i32, rows: Option<Rows>, tx: OptionOutputTx) {
+    pub(crate) fn push_mutation(
+        &mut self,
+        op_type: i32,
+        rows: Option<Rows>,
+        write_hint: WriteHint,
+        tx: OptionOutputTx,
+    ) {
         let num_rows = rows.as_ref().map(|rows| rows.rows.len()).unwrap_or(0);
         self.wal_entry.mutations.push(Mutation {
             op_type,
             sequence: self.next_sequence,
             rows,
-            write_hint: 0,
+            write_hint: write_hint.bits() as u64,
         });
 
         let notify = WriteNotify::new(tx, num_rows);

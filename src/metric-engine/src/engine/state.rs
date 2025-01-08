@@ -15,12 +15,16 @@
 //! Internal states of metric engine
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-use snafu::OptionExt;
-use store_api::metadata::ColumnMetadata;
+use api::v1::SemanticType;
+use snafu::{OptionExt, ResultExt};
+use store_api::codec::PrimaryKeyEncoding;
+use store_api::metadata::{ColumnMetadata, RegionMetadataBuilder, RegionMetadataRef};
 use store_api::storage::RegionId;
 
-use crate::error::{PhysicalRegionNotFoundSnafu, Result};
+use crate::codec::{Codec, CodecRef};
+use crate::error::{InvalidMetadataSnafu, PhysicalRegionNotFoundSnafu, Result};
 use crate::metrics::LOGICAL_REGION_COUNT;
 use crate::utils::to_data_region_id;
 
@@ -36,10 +40,16 @@ pub(crate) struct MetricEngineState {
     /// Cache for the columns of physical regions.
     /// The region id in key is the data region id.
     physical_columns: HashMap<RegionId, HashSet<String>>,
-    /// Cache for the column metadata of logical regions.
-    /// The column order is the same with the order in the metadata, which is
-    /// alphabetically ordered on column name.
+    /// Cache for the logical region metadatas.
+    logical_region_metadatas: HashMap<RegionId, RegionMetadataRef>,
+    /// Cache for the logical region codec.
+    logical_region_codec: HashMap<RegionId, CodecRef>,
+    /// Cache for the logical region columns.
     logical_columns: HashMap<RegionId, Vec<ColumnMetadata>>,
+}
+
+pub(crate) fn primary_key_encoding() -> PrimaryKeyEncoding {
+    PrimaryKeyEncoding::Sparse
 }
 
 impl MetricEngineState {
@@ -90,8 +100,38 @@ impl MetricEngineState {
         &mut self,
         logical_region_id: RegionId,
         columns: Vec<ColumnMetadata>,
-    ) {
+    ) -> Result<()> {
+        let primary_keys = columns
+            .iter()
+            .filter_map(|col| {
+                if col.semantic_type == SemanticType::Tag {
+                    Some(col.column_id)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let mut logical_metadata_builder = RegionMetadataBuilder::new(logical_region_id);
+        for col in columns.clone() {
+            logical_metadata_builder.push_column_metadata(col);
+        }
+        logical_metadata_builder.primary_key(primary_keys);
+        let logical_metadata = Arc::new(
+            logical_metadata_builder
+                .build()
+                .context(InvalidMetadataSnafu)?,
+        );
+        self.logical_region_codec
+            .insert(logical_region_id, Arc::new(Codec::new(&logical_metadata)));
+        self.logical_region_metadatas
+            .insert(logical_region_id, logical_metadata);
         self.logical_columns.insert(logical_region_id, columns);
+        Ok(())
+    }
+
+    pub fn get_region_codec(&self, logical_region_id: RegionId) -> Option<&CodecRef> {
+        self.logical_region_codec.get(&logical_region_id)
     }
 
     pub fn get_physical_region_id(&self, logical_region_id: RegionId) -> Option<RegionId> {
@@ -147,12 +187,13 @@ impl MetricEngineState {
             .unwrap() // Safety: physical_region_id is got from physical_regions
             .remove(&logical_region_id);
 
-        self.logical_columns.remove(&logical_region_id);
-
+        self.invalid_logical_column_cache(logical_region_id);
         Ok(())
     }
 
     pub fn invalid_logical_column_cache(&mut self, logical_region_id: RegionId) {
+        self.logical_region_metadatas.remove(&logical_region_id);
+        self.logical_region_codec.remove(&logical_region_id);
         self.logical_columns.remove(&logical_region_id);
     }
 

@@ -587,6 +587,20 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(expect, options);
+
+        let map = make_map(&[
+            ("memtable.type", "partition_tree"),
+            ("memtable.partition_tree.primary_key_encoding", "sparse"),
+        ]);
+        let options = RegionOptions::try_from(&map).unwrap();
+        let expect = RegionOptions {
+            memtable: Some(MemtableOptions::PartitionTree(PartitionTreeOptions {
+                primary_key_encoding: PrimaryKeyEncoding::Sparse,
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert_eq!(expect, options);
     }
 
     #[test]

@@ -57,6 +57,7 @@ pub mod engine;
 pub mod error;
 mod metadata_region;
 mod metrics;
+mod codec;
 #[cfg(test)]
 mod test_util;
 mod utils;

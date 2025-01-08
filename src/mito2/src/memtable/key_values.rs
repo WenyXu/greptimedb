@@ -16,8 +16,13 @@ use std::collections::HashMap;
 
 use api::v1::{ColumnSchema, Mutation, OpType, Row, Rows};
 use datatypes::value::ValueRef;
+use store_api::codec::PrimaryKeyEncoding;
 use store_api::metadata::RegionMetadata;
+use store_api::region_engine::WriteHint;
 use store_api::storage::{ColumnId, SequenceNumber};
+
+use crate::error::{EncodePrimaryKeySnafu, Result};
+use crate::row_converter::RowCodec;
 
 /// Key value view of a mutation.
 #[derive(Debug)]
@@ -29,6 +34,8 @@ pub struct KeyValues {
     pub(crate) mutation: Mutation,
     /// Key value read helper.
     helper: SparseReadRowHelper,
+    /// Write hint.
+    pub(crate) write_hint: WriteHint,
 }
 
 impl KeyValues {
@@ -37,9 +44,23 @@ impl KeyValues {
     /// Returns `None` if `rows` of the `mutation` is `None`.
     pub fn new(metadata: &RegionMetadata, mutation: Mutation) -> Option<KeyValues> {
         let rows = mutation.rows.as_ref()?;
-        let helper = SparseReadRowHelper::new(metadata, rows);
+        // TODO(weny): use the real hint.
+        let hint = WriteHint::from_bits(1).unwrap();
+        let helper = SparseReadRowHelper::new(metadata, rows, hint);
 
-        Some(KeyValues { mutation, helper })
+        Some(KeyValues {
+            mutation,
+            helper,
+            write_hint: hint,
+        })
+    }
+
+    /// Verify if the primary key encoding is correct.
+    pub fn verify_primary_key_encoding(&self, memtable: PrimaryKeyEncoding) -> bool {
+        match memtable {
+            PrimaryKeyEncoding::Full => !self.write_hint.contains(WriteHint::SPARSE_KEY_ENCODING),
+            PrimaryKeyEncoding::Sparse => self.write_hint.contains(WriteHint::SPARSE_KEY_ENCODING),
+        }
     }
 
     /// Returns a key value iterator.
@@ -54,6 +75,7 @@ impl KeyValues {
                 sequence: self.mutation.sequence + idx as u64, // Calculate sequence for each row.
                 // Safety: This is a valid mutation.
                 op_type: OpType::try_from(self.mutation.op_type).unwrap(),
+                write_hint: self.write_hint,
             }
         })
     }
@@ -94,6 +116,8 @@ pub struct KeyValuesRef<'a> {
     mutation: &'a Mutation,
     /// Key value read helper.
     helper: SparseReadRowHelper,
+    /// Write hint.
+    write_hint: WriteHint,
 }
 
 impl<'a> KeyValuesRef<'a> {
@@ -102,9 +126,15 @@ impl<'a> KeyValuesRef<'a> {
     /// Returns `None` if `rows` of the `mutation` is `None`.
     pub fn new(metadata: &RegionMetadata, mutation: &'a Mutation) -> Option<KeyValuesRef<'a>> {
         let rows = mutation.rows.as_ref()?;
-        let helper = SparseReadRowHelper::new(metadata, rows);
+        // TODO(weny): use the real hint.
+        let hint = WriteHint::from_bits(1).unwrap();
+        let helper = SparseReadRowHelper::new(metadata, rows, hint);
 
-        Some(KeyValuesRef { mutation, helper })
+        Some(KeyValuesRef {
+            mutation,
+            helper,
+            write_hint: hint,
+        })
     }
 
     /// Returns a key value iterator.
@@ -119,6 +149,7 @@ impl<'a> KeyValuesRef<'a> {
                 sequence: self.mutation.sequence + idx as u64, // Calculate sequence for each row.
                 // Safety: This is a valid mutation.
                 op_type: OpType::try_from(self.mutation.op_type).unwrap(),
+                write_hint: self.write_hint,
             }
         })
     }
@@ -143,9 +174,26 @@ pub struct KeyValue<'a> {
     helper: &'a SparseReadRowHelper,
     sequence: SequenceNumber,
     op_type: OpType,
+    write_hint: WriteHint,
 }
 
 impl KeyValue<'_> {
+    pub fn encode_primary_key(&self, codec: &impl RowCodec, buffer: &mut Vec<u8>) -> Result<()> {
+        if self.write_hint.contains(WriteHint::PRIMARY_KEY_ENCODED) {
+            // TODO(weny): handle error
+            let ValueRef::Binary(primary_key) = self.primary_keys().next().unwrap().1 else {
+                return EncodePrimaryKeySnafu {
+                    reason: "primary key is not binary".to_string(),
+                }
+                .fail();
+            };
+            buffer.extend_from_slice(primary_key);
+            Ok(())
+        } else {
+            codec.encode_to_vec(self.primary_keys(), buffer)
+        }
+    }
+
     /// Get primary key columns.
     pub fn primary_keys(&self) -> impl Iterator<Item = (ColumnId, ValueRef)> {
         self.helper.indices[..self.helper.num_primary_key_column]
@@ -231,7 +279,22 @@ impl SparseReadRowHelper {
     ///
     /// # Panics
     /// Time index column must exist.
-    fn new(metadata: &RegionMetadata, rows: &Rows) -> SparseReadRowHelper {
+    fn new(metadata: &RegionMetadata, rows: &Rows, hint: WriteHint) -> SparseReadRowHelper {
+        if hint.contains(WriteHint::PRIMARY_KEY_ENCODED) {
+            return SparseReadRowHelper {
+                indices: rows
+                    .schema
+                    .iter()
+                    .enumerate()
+                    .map(|(index, col)| ValueIndex {
+                        column_id: metadata.column_by_name(&col.column_name).unwrap().column_id,
+                        index: Some(index),
+                    })
+                    .collect(),
+                num_primary_key_column: 1,
+            };
+        }
+
         // Build a name to index mapping for rows.
         let name_to_index: HashMap<_, _> = rows
             .schema

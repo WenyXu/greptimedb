@@ -22,6 +22,7 @@ use std::sync::Arc;
 pub use bulk::part::BulkPart;
 use common_time::Timestamp;
 use serde::{Deserialize, Serialize};
+use store_api::codec::PrimaryKeyEncoding;
 use store_api::metadata::RegionMetadataRef;
 use store_api::storage::{ColumnId, SequenceNumber};
 use table::predicate::Predicate;
@@ -287,6 +288,7 @@ impl MemtableBuilderProvider {
         options: Option<&MemtableOptions>,
         dedup: bool,
         merge_mode: MergeMode,
+        primary_key_encoding: PrimaryKeyEncoding,
     ) -> MemtableBuilderRef {
         match options {
             Some(MemtableOptions::TimeSeries) => Arc::new(TimeSeriesMemtableBuilder::new(
@@ -302,6 +304,7 @@ impl MemtableBuilderProvider {
                         fork_dictionary_bytes: opts.fork_dictionary_bytes,
                         dedup,
                         merge_mode,
+                        primary_key_encoding,
                     },
                     self.write_buffer_manager.clone(),
                 ))

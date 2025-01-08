@@ -75,7 +75,7 @@ impl MetricEngineInner {
             .collect::<Vec<_>>();
         // Sort columns on column name to ensure the order
         dedup_columns.sort_unstable_by(|c1, c2| c1.column_schema.name.cmp(&c2.column_schema.name));
-        mutable_state.set_logical_columns(logical_region_id, dedup_columns.clone());
+        mutable_state.set_logical_columns(logical_region_id, dedup_columns.clone())?;
 
         Ok(dedup_columns)
     }

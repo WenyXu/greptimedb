@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 use common_base::readable_size::ReadableSize;
 use serde::{Deserialize, Serialize};
+use store_api::codec::PrimaryKeyEncoding;
 use store_api::metadata::RegionMetadataRef;
 use store_api::storage::ColumnId;
 use table::predicate::Predicate;
@@ -83,6 +84,8 @@ pub struct PartitionTreeConfig {
     /// Merge mode of the tree.
     #[serde(skip_deserializing)]
     pub merge_mode: MergeMode,
+    /// Primary key encoding mode.
+    pub primary_key_encoding: PrimaryKeyEncoding,
 }
 
 impl Default for PartitionTreeConfig {
@@ -102,6 +105,7 @@ impl Default for PartitionTreeConfig {
             dedup: true,
             fork_dictionary_bytes,
             merge_mode: MergeMode::LastRow,
+            primary_key_encoding: PrimaryKeyEncoding::default(),
         }
     }
 }
