@@ -72,7 +72,6 @@ impl RowCodec for SparseRowCodec {
         for (column_id, value) in row {
             if !value.is_null() {
                 if let Some(field) = &self.fields.get(&column_id) {
-                    common_telemetry::debug!("encode column: {} field: {:?}", column_id, field);
                     column_id
                         .serialize(&mut serializer)
                         .context(SerializeFieldSnafu)?;

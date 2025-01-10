@@ -103,7 +103,7 @@ impl IndexValuesCodec {
     pub fn decode(
         &self,
         primary_key: &[u8],
-    ) -> Result<Box<dyn Iterator<Item = (ColumnId, Option<Value>)> + Send + '_>> {
+    ) -> Result<Vec<(ColumnId, Option<Value>)>> {
         let values = self.decoder.decode(primary_key)?;
         match values {
             CompositeValues::Dense(values) => {
@@ -119,13 +119,13 @@ impl IndexValuesCodec {
                             }
                         });
 
-                Ok(Box::new(iter))
+                Ok(iter.collect())
             }
             CompositeValues::Sparse(values) => {
                 let iter = values
                     .into_iter()
                     .map(|(column_id, value)| (column_id, Some(value)));
-                Ok(Box::new(iter))
+                Ok(iter.collect())
             }
         }
     }

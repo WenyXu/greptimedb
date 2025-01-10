@@ -95,15 +95,13 @@ impl MetadataRegion {
             }
             .fail()
         } else {
-            self.logical_region_lock
-                .write()
-                .await
-                .insert(logical_region_id, Arc::new(RwLock::new(())));
+            self.open_logical_region(logical_region_id).await;
             Ok(())
         }
     }
 
     pub async fn open_logical_region(&self, logical_region_id: RegionId) {
+        common_telemetry::debug!("insert logical region lock: {:?}", logical_region_id);
         self.logical_region_lock
             .write()
             .await
@@ -137,6 +135,7 @@ impl MetadataRegion {
         &self,
         logical_region_id: RegionId,
     ) -> Result<OwnedRwLockReadGuard<()>> {
+        common_telemetry::debug!("read_lock_logical_region: {:?}", logical_region_id);
         let lock = self
             .logical_region_lock
             .read()
@@ -146,7 +145,9 @@ impl MetadataRegion {
                 region_id: logical_region_id,
             })?
             .clone();
-        Ok(RwLock::read_owned(lock).await)
+        let lock = RwLock::read_owned(lock).await;
+        common_telemetry::debug!("acquired read lock for logical region: {:?}", logical_region_id);
+        Ok(lock)
     }
 
     /// Retrieve a write lock guard of given logical region id.
@@ -154,6 +155,11 @@ impl MetadataRegion {
         &self,
         logical_region_id: RegionId,
     ) -> Result<OwnedRwLockWriteGuard<()>> {
+        common_telemetry::debug!(
+            "going to acquire write lock for logical region: {:?}",
+            logical_region_id
+        );
+
         let lock = self
             .logical_region_lock
             .read()
@@ -163,7 +169,12 @@ impl MetadataRegion {
                 region_id: logical_region_id,
             })?
             .clone();
-        Ok(RwLock::write_owned(lock).await)
+        let lock = RwLock::write_owned(lock).await;
+        common_telemetry::debug!(
+            "acquired write lock for logical region: {:?}",
+            logical_region_id
+        );
+        Ok(lock)
     }
 
     /// Remove a registered logical region from metadata.

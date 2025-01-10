@@ -132,6 +132,7 @@ impl RegionEngine for MetricEngine {
     ) -> Result<RegionResponse, BoxedError> {
         let mut extension_return_value = HashMap::new();
 
+        common_telemetry::info!("handle request: {:?}", request);
         let result = match request {
             RegionRequest::Put(put) => self.inner.put_region(region_id, put).await,
             RegionRequest::Create(create) => {

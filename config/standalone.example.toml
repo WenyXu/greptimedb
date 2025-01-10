@@ -32,7 +32,7 @@ max_concurrent_queries = 0
 ## The HTTP server options.
 [http]
 ## The address to bind the HTTP server.
-addr = "127.0.0.1:4000"
+addr = "0.0.0.0:4000"
 ## HTTP request timeout. Set to 0 to disable timeout.
 timeout = "30s"
 ## HTTP request body limit.

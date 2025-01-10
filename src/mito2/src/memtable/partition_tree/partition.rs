@@ -59,7 +59,6 @@ pub type PartitionRef = Arc<Partition>;
 impl Partition {
     /// Creates a new partition.
     pub fn new(metadata: RegionMetadataRef, config: &PartitionTreeConfig) -> Self {
-        common_telemetry::debug!("primary_key_encoding: {:?}", config.primary_key_encoding);
         Partition {
             inner: RwLock::new(Inner::new(metadata, config)),
             dedup: config.dedup,
@@ -92,7 +91,6 @@ impl Partition {
         // Key does not yet exist in shard or builder, encode and insert the full primary key.
         if is_partitioned {
             if self.primary_key_encoding == PrimaryKeyEncoding::Sparse {
-                common_telemetry::debug!("sparse primary key");
                 let sparse_key = primary_key.clone();
                 let pk_id = inner.shard_builder.write_with_key(
                     primary_key,
@@ -280,7 +278,6 @@ impl Partition {
         }
 
         let key = key_value.partition_key();
-        common_telemetry::debug!("partition key: {:?}", key);
         key
     }
 

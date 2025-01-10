@@ -73,10 +73,11 @@ where
             !self.blob_keys.contains(key),
             DuplicateBlobSnafu { blob: key }
         );
-
+        common_telemetry::debug!("start put_blob");
         let written_bytes = self
             .handle_compress(key.to_string(), raw_data, options.compression)
             .await?;
+        common_telemetry::debug!("end put_blob");
 
         self.blob_keys.insert(key.to_string());
         Ok(written_bytes)

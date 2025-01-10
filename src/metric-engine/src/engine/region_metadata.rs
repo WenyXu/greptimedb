@@ -42,19 +42,20 @@ impl MetricEngineInner {
             return Ok(columns.clone());
         }
 
-        // Else load from metadata region and update the cache.
-        let _read_guard = self
-            .metadata_region
-            .read_lock_logical_region(logical_region_id)
-            .await;
-        // Load logical and physical columns, and intersect them to get logical column metadata.
-        let logical_column_metadata = self
-            .metadata_region
-            .logical_columns(physical_region_id, logical_region_id)
-            .await?
-            .into_iter()
-            .map(|(_, column_metadata)| column_metadata)
-            .collect::<Vec<_>>();
+        let logical_column_metadata = {
+            // Else load from metadata region and update the cache.
+            let _read_guard = self
+                .metadata_region
+                .read_lock_logical_region(logical_region_id)
+                .await;
+            // Load logical and physical columns, and intersect them to get logical column metadata.
+            self.metadata_region
+                .logical_columns(physical_region_id, logical_region_id)
+                .await?
+                .into_iter()
+                .map(|(_, column_metadata)| column_metadata)
+                .collect::<Vec<_>>()
+        };
 
         // Update cache
         let mut mutable_state = self.state.write().unwrap();

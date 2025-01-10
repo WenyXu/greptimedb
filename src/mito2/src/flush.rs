@@ -365,6 +365,7 @@ impl RegionFlushTask {
                 fulltext_index_config: self.engine_config.fulltext_index.clone(),
                 bloom_filter_index_config: self.engine_config.bloom_filter_index.clone(),
             };
+            common_telemetry::debug!("start write_sst");
             let Some(sst_info) = self
                 .access_layer
                 .write_sst(write_request, &write_opts)
@@ -373,6 +374,7 @@ impl RegionFlushTask {
                 // No data written.
                 continue;
             };
+            common_telemetry::debug!("end write_sst");
 
             flushed_bytes += sst_info.file_size;
             let file_meta = FileMeta {

@@ -189,6 +189,7 @@ impl Memtable for PartitionTreeMemtable {
         projection: Option<&[ColumnId]>,
         predicate: Option<Predicate>,
     ) -> Result<BoxedBatchIterator> {
+        common_telemetry::debug!("iter");
         self.tree.read(projection, predicate)
     }
 

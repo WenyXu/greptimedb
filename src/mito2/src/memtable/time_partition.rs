@@ -122,7 +122,6 @@ impl TimePartitions {
         for part in parts.iter().rev() {
             let mut all_in_partition = true;
             for kv in kvs.iter() {
-                common_telemetry::info!("kv: {:?}", kv);
                 // Safety: We checked the schema in the write request.
                 let ts = kv.timestamp().as_timestamp().unwrap().unwrap();
                 if !part.contains_timestamp(ts) {
