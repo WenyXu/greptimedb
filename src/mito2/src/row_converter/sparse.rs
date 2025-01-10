@@ -32,7 +32,7 @@ pub struct SparseRowCodec {
     table_id_decoder: SortField,
     tsid_decoder: SortField,
     label_decoder: SortField,
-    fields: HashMap<ColumnId, SortField>,
+    pub fields: HashMap<ColumnId, SortField>,
 }
 
 impl SparseRowCodec {
@@ -72,10 +72,17 @@ impl RowCodec for SparseRowCodec {
         for (column_id, value) in row {
             if !value.is_null() {
                 if let Some(field) = &self.fields.get(&column_id) {
+                    common_telemetry::debug!("encode column: {} field: {:?}", column_id, field);
                     column_id
                         .serialize(&mut serializer)
                         .context(SerializeFieldSnafu)?;
                     field.serialize(&mut serializer, &value)?;
+                } else {
+                    common_telemetry::debug!(
+                        "field not found encode column: {} field: {:?}",
+                        column_id,
+                        value
+                    );
                 }
             }
         }

@@ -22,6 +22,7 @@ use common_telemetry::debug;
 use snafu::ensure;
 use store_api::logstore::LogStore;
 use store_api::metadata::RegionMetadata;
+use store_api::region_engine::WriteHint;
 use store_api::storage::RegionId;
 
 use crate::error::{InvalidRequestSnafu, RegionLeaderStateSnafu, RejectWriteSnafu, Result};
@@ -231,13 +232,20 @@ impl<S> RegionWorkerLoop<S> {
                 continue;
             }
 
-            // Checks whether request schema is compatible with region schema.
-            if let Err(e) =
-                maybe_fill_missing_columns(&mut sender_req.request, &region_ctx.version().metadata)
+            if !sender_req
+                .request
+                .hint
+                .contains(WriteHint::PRIMARY_KEY_ENCODED)
             {
-                sender_req.sender.send(Err(e));
+                // Checks whether request schema is compatible with region schema.
+                if let Err(e) = maybe_fill_missing_columns(
+                    &mut sender_req.request,
+                    &region_ctx.version().metadata,
+                ) {
+                    sender_req.sender.send(Err(e));
 
-                continue;
+                    continue;
+                }
             }
 
             // Collect requests by region.

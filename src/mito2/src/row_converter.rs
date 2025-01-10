@@ -401,6 +401,70 @@ impl CompositeRowCodec {
     pub fn is_sparse(&self) -> bool {
         matches!(self, CompositeRowCodec::Sparse(_))
     }
+
+    pub fn decode_value_at(
+        &self,
+        bytes: &[u8],
+        pos: usize,
+        offsets_buf: &mut Vec<usize>,
+    ) -> Result<Value> {
+        match self {
+            CompositeRowCodec::Full(codec) => codec.decode_value_at(bytes, pos, offsets_buf),
+            CompositeRowCodec::Sparse(_) => unreachable!(),
+        }
+    }
+
+    pub fn has_column(
+        &self,
+        pk: &[u8],
+        offsets_map: &mut HashMap<u32, usize>,
+        column_id: ColumnId,
+    ) -> Option<usize> {
+        match self {
+            CompositeRowCodec::Full(_) => None,
+            CompositeRowCodec::Sparse(codec) => {
+                if offsets_map.is_empty() {
+                    let mut deserializer = Deserializer::new(pk);
+                    let mut offset = 0;
+                    while deserializer.has_remaining() {
+                        let column_id = u32::deserialize(&mut deserializer).unwrap();
+                        offset += 4;
+                        offsets_map.insert(column_id, offset);
+                        let Some(field) = codec.fields.get(&column_id) else {
+                            break;
+                        };
+
+                        let skip = field.skip_deserialize(pk, &mut deserializer).unwrap();
+                        offset += skip;
+                    }
+
+                    offsets_map.get(&column_id).copied()
+                } else {
+                    offsets_map.get(&column_id).copied()
+                }
+            }
+        }
+    }
+
+    /// Decode value at `offset` in `pk`.
+    pub(crate) fn sparse_decode_value_at(
+        &self,
+        pk: &[u8],
+        offset: usize,
+        column_id: ColumnId,
+    ) -> Result<Value> {
+        match self {
+            CompositeRowCodec::Full(_) => unreachable!(),
+            CompositeRowCodec::Sparse(codec) => {
+                let mut deserializer = Deserializer::new(pk);
+                deserializer.advance(offset);
+                let field = codec.fields.get(&column_id).unwrap();
+                field
+                    .deserialize(&mut deserializer)
+                    .inspect_err(|e| common_telemetry::error!(e; "Failed to decode primary key, column_id: {:?}, pk: {:?}", column_id, pk))
+            }
+        }
+    }
 }
 
 impl RowCodec for CompositeRowCodec {

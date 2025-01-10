@@ -21,7 +21,10 @@ use datatypes::prelude::ConcreteDataType;
 use datatypes::value::ValueRef;
 use mito2::row_converter::{RowCodec, SortField, SparseRowCodec};
 use store_api::metadata::RegionMetadataRef;
-use store_api::metric_engine_consts::DATA_SCHEMA_ENCODED_PRIMARY_KEY_COLUMN_NAME;
+use store_api::metric_engine_consts::{
+    DATA_SCHEMA_ENCODED_PRIMARY_KEY_COLUMN_NAME, DATA_SCHEMA_TABLE_ID_COLUMN_NAME,
+    DATA_SCHEMA_TSID_COLUMN_NAME,
+};
 use store_api::storage::consts::ReservedColumnId;
 use store_api::storage::ColumnId;
 
@@ -30,7 +33,7 @@ use crate::error::Result;
 pub type CodecRef = Arc<Codec>;
 
 pub struct Codec {
-    codec: SparseRowCodec,
+    pub(crate) codec: SparseRowCodec,
     pub(crate) region_metadata: RegionMetadataRef,
 }
 
@@ -134,6 +137,7 @@ impl RowIter<'_> {
         self.index.indices[..self.index.num_primary_key_column]
             .iter()
             .map(|idx| {
+                common_telemetry::debug!("primary key: {:?}", idx);
                 (
                     idx.column_id,
                     api::helper::pb_value_to_value_ref(
@@ -167,15 +171,33 @@ impl IterIndex {
         let name_to_index = row_schema
             .iter()
             .enumerate()
-            .map(|(idx, col)| (&col.column_name, idx))
+            .map(|(idx, col)| (col.column_name.as_str(), idx))
             .collect::<HashMap<_, _>>();
 
         let mut indices = Vec::with_capacity(metadata.column_metadatas.len());
         let mut num_primary_key_column = 0;
+        // TODO: internal column should be added
+
+        for (pk_column_id, name) in [
+            (
+                ReservedColumnId::table_id(),
+                DATA_SCHEMA_TABLE_ID_COLUMN_NAME,
+            ),
+            (ReservedColumnId::tsid(), DATA_SCHEMA_TSID_COLUMN_NAME),
+        ] {
+            if let Some(index) = name_to_index.get(name) {
+                indices.push(ValueIndex {
+                    column_id: pk_column_id,
+                    index: *index,
+                });
+                num_primary_key_column += 1;
+            }
+        }
+
         for pk_column_id in &metadata.primary_key {
             // Safety: Id comes from primary key.
             let column = metadata.column_by_id(*pk_column_id).unwrap();
-            if let Some(index) = name_to_index.get(&column.column_schema.name) {
+            if let Some(index) = name_to_index.get(column.column_schema.name.as_str()) {
                 indices.push(ValueIndex {
                     column_id: *pk_column_id,
                     index: *index,
@@ -187,7 +209,7 @@ impl IterIndex {
         // Get timestamp index.
         // Safety: time index must exist
         let ts_index = name_to_index
-            .get(&metadata.time_index_column().column_schema.name)
+            .get(metadata.time_index_column().column_schema.name.as_str())
             .unwrap();
         indices.push(ValueIndex {
             column_id: metadata.time_index_column().column_id,
@@ -197,7 +219,7 @@ impl IterIndex {
         // Iterate columns and find field columns.
         for column in metadata.field_columns() {
             // Get index in request for each field column.
-            if let Some(index) = name_to_index.get(&column.column_schema.name) {
+            if let Some(index) = name_to_index.get(column.column_schema.name.as_str()) {
                 indices.push(ValueIndex {
                     column_id: column.column_id,
                     index: *index,
@@ -205,6 +227,11 @@ impl IterIndex {
             }
         }
 
+        common_telemetry::debug!(
+            "indices: {:?}, num_primary_key_column: {:?}",
+            indices,
+            num_primary_key_column
+        );
         IterIndex {
             indices,
             num_primary_key_column,

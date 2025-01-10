@@ -25,12 +25,12 @@ use datafusion_common::ScalarValue;
 use datatypes::prelude::ValueRef;
 use memcomparable::Serializer;
 use serde::Serialize;
-use snafu::{ensure, ResultExt};
+use snafu::ResultExt;
 use store_api::metadata::RegionMetadataRef;
 use store_api::storage::ColumnId;
 use table::predicate::Predicate;
 
-use crate::error::{PrimaryKeyLengthMismatchSnafu, Result, SerializeFieldSnafu};
+use crate::error::{Result, SerializeFieldSnafu};
 use crate::flush::WriteBufferManagerRef;
 use crate::memtable::key_values::KeyValue;
 use crate::memtable::partition_tree::partition::{
@@ -43,7 +43,7 @@ use crate::metrics::{PARTITION_TREE_READ_STAGE_ELAPSED, READ_ROWS_TOTAL, READ_ST
 use crate::read::dedup::LastNonNullIter;
 use crate::read::Batch;
 use crate::region::options::MergeMode;
-use crate::row_converter::{McmpRowCodec, RowCodec, SortField};
+use crate::row_converter::{CompositeRowCodec, RowCodec, SortField};
 
 /// The partition tree.
 pub struct PartitionTree {
@@ -52,7 +52,7 @@ pub struct PartitionTree {
     /// Metadata of the region.
     pub(crate) metadata: RegionMetadataRef,
     /// Primary key codec.
-    row_codec: Arc<McmpRowCodec>,
+    row_codec: Arc<CompositeRowCodec>,
     /// Partitions in the tree.
     partitions: RwLock<BTreeMap<PartitionKey, PartitionRef>>,
     /// Whether the tree has multiple partitions.
@@ -69,12 +69,7 @@ impl PartitionTree {
         config: &PartitionTreeConfig,
         write_buffer_manager: Option<WriteBufferManagerRef>,
     ) -> PartitionTree {
-        let row_codec = McmpRowCodec::new(
-            metadata
-                .primary_key_columns()
-                .map(|c| SortField::new(c.column_schema.data_type.clone()))
-                .collect(),
-        );
+        let row_codec = CompositeRowCodec::new(&metadata);
         let sparse_encoder = SparseEncoder {
             fields: metadata
                 .primary_key_columns()
@@ -115,13 +110,13 @@ impl PartitionTree {
         let has_pk = !self.metadata.primary_key.is_empty();
 
         for kv in kvs.iter() {
-            ensure!(
-                kv.num_primary_keys() == self.row_codec.num_fields(),
-                PrimaryKeyLengthMismatchSnafu {
-                    expect: self.row_codec.num_fields(),
-                    actual: kv.num_primary_keys(),
-                }
-            );
+            // ensure!(
+            //     kv.num_primary_keys() == self.row_codec.num_fields(),
+            //     PrimaryKeyLengthMismatchSnafu {
+            //         expect: self.row_codec.num_fields(),
+            //         actual: kv.num_primary_keys(),
+            //     }
+            // );
             // Safety: timestamp of kv must be both present and a valid timestamp value.
             let ts = kv.timestamp().as_timestamp().unwrap().unwrap().value();
             metrics.min_ts = metrics.min_ts.min(ts);
@@ -165,13 +160,13 @@ impl PartitionTree {
     ) -> Result<()> {
         let has_pk = !self.metadata.primary_key.is_empty();
 
-        ensure!(
-            kv.num_primary_keys() == self.row_codec.num_fields(),
-            PrimaryKeyLengthMismatchSnafu {
-                expect: self.row_codec.num_fields(),
-                actual: kv.num_primary_keys(),
-            }
-        );
+        // ensure!(
+        //     kv.num_primary_keys() == self.row_codec.num_fields(),
+        //     PrimaryKeyLengthMismatchSnafu {
+        //         expect: self.row_codec.num_fields(),
+        //         actual: kv.num_primary_keys(),
+        //     }
+        // );
         // Safety: timestamp of kv must be both present and a valid timestamp value.
         let ts = kv.timestamp().as_timestamp().unwrap().unwrap().value();
         metrics.min_ts = metrics.min_ts.min(ts);

@@ -83,6 +83,14 @@ impl MetricEngineInner {
             .with_context(|| LogicalRegionNotFoundSnafu {
                 region_id: logical_region_id,
             })?;
+        let data_region_id = to_data_region_id(physical_region_id);
+        self.verify_put_request(logical_region_id, physical_region_id, &request)
+            .await?;
+
+        // TODO(weny): refactor it
+        let _ = self
+            .logical_region_metadata(physical_region_id, logical_region_id)
+            .await?;
         let codec = self
             .state
             .read()
@@ -92,10 +100,6 @@ impl MetricEngineInner {
                 region_id: logical_region_id,
             })?
             .clone();
-        let data_region_id = to_data_region_id(physical_region_id);
-
-        self.verify_put_request(logical_region_id, physical_region_id, &request)
-            .await?;
 
         // write to data region
 
@@ -200,6 +204,8 @@ impl MetricEngineInner {
     }
 
     fn encode_primary_key(&self, codec: &CodecRef, rows: Rows) -> Result<Rows> {
+        common_telemetry::debug!("encode primary key: {:?}", rows);
+        common_telemetry::debug!("codec: {:?}", codec.codec);
         let iter = RowsIter::new(rows, &codec.region_metadata);
         let encoded = codec.encode_rows(iter)?;
         Ok(encoded)

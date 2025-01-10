@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use api::v1::{ColumnSchema, Mutation, OpType, Row, Rows};
+use datatypes::prelude::ConcreteDataType;
 use datatypes::value::ValueRef;
 use store_api::codec::PrimaryKeyEncoding;
 use store_api::metadata::RegionMetadata;
@@ -22,7 +23,7 @@ use store_api::region_engine::WriteHint;
 use store_api::storage::{ColumnId, SequenceNumber};
 
 use crate::error::{EncodePrimaryKeySnafu, Result};
-use crate::row_converter::RowCodec;
+use crate::row_converter::{LeftMostSparseRowCodec, LeftMostValueDecoder, RowCodec};
 
 /// Key value view of a mutation.
 #[derive(Debug)]
@@ -44,8 +45,7 @@ impl KeyValues {
     /// Returns `None` if `rows` of the `mutation` is `None`.
     pub fn new(metadata: &RegionMetadata, mutation: Mutation) -> Option<KeyValues> {
         let rows = mutation.rows.as_ref()?;
-        // TODO(weny): use the real hint.
-        let hint = WriteHint::from_bits(1).unwrap();
+        let hint = WriteHint::from_bits(mutation.write_hint as u8).unwrap();
         let helper = SparseReadRowHelper::new(metadata, rows, hint);
 
         Some(KeyValues {
@@ -126,8 +126,7 @@ impl<'a> KeyValuesRef<'a> {
     /// Returns `None` if `rows` of the `mutation` is `None`.
     pub fn new(metadata: &RegionMetadata, mutation: &'a Mutation) -> Option<KeyValuesRef<'a>> {
         let rows = mutation.rows.as_ref()?;
-        // TODO(weny): use the real hint.
-        let hint = WriteHint::from_bits(1).unwrap();
+        let hint = WriteHint::from_bits(mutation.write_hint as u8).unwrap();
         let helper = SparseReadRowHelper::new(metadata, rows, hint);
 
         Some(KeyValuesRef {
@@ -210,6 +209,26 @@ impl KeyValue<'_> {
             })
     }
 
+    pub fn partition_key(&self) -> u32 {
+        if self.write_hint.contains(WriteHint::PRIMARY_KEY_ENCODED) {
+            let Some((_, value)) = self.primary_keys().next() else {
+                return 0;
+            };
+
+            let key = value.as_binary().unwrap().unwrap();
+            let codec = LeftMostSparseRowCodec::new(ConcreteDataType::uint32_datatype());
+            let value = codec.decode_leftmost(key).unwrap().unwrap();
+            let value = value.as_value_ref();
+            value.as_u32().unwrap().unwrap()
+        } else {
+            let Some((_, value)) = self.primary_keys().next() else {
+                return 0;
+            };
+
+            value.as_u32().unwrap().unwrap()
+        }
+    }
+
     /// Get field columns.
     pub fn fields(&self) -> impl Iterator<Item = ValueRef> {
         self.helper.indices[self.helper.num_primary_key_column + 1..]
@@ -287,7 +306,11 @@ impl SparseReadRowHelper {
                     .iter()
                     .enumerate()
                     .map(|(index, col)| ValueIndex {
-                        column_id: metadata.column_by_name(&col.column_name).unwrap().column_id,
+                        // The encoded primary key is not in the region metdata, so we use the zero as the column id.
+                        column_id: metadata
+                            .column_by_name(&col.column_name)
+                            .map(|c| c.column_id)
+                            .unwrap_or_default(),
                         index: Some(index),
                     })
                     .collect(),

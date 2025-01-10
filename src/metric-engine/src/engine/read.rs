@@ -135,6 +135,7 @@ impl MetricEngineInner {
     ) -> Result<ScanRequest> {
         // transform projection
         let physical_projection = if let Some(projection) = &request.projection {
+            common_telemetry::debug!("projection: {:?}", projection);
             self.transform_projection(physical_region_id, logical_region_id, projection)
                 .await?
         } else {
@@ -202,6 +203,7 @@ impl MetricEngineInner {
         let logical_columns = self
             .load_logical_column_names(physical_region_id, logical_region_id)
             .await?;
+        common_telemetry::debug!("logical_columns: {:?}", logical_columns);
         let mut projection = Vec::with_capacity(logical_columns.len());
         let data_region_id = utils::to_data_region_id(physical_region_id);
         let physical_metadata = self

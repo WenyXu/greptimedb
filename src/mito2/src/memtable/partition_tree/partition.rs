@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use api::v1::SemanticType;
 use common_recordbatch::filter::SimpleFilterEvaluator;
+use datatypes::value::Value;
 use store_api::codec::PrimaryKeyEncoding;
 use store_api::metadata::RegionMetadataRef;
 use store_api::metric_engine_consts::DATA_SCHEMA_TABLE_ID_COLUMN_NAME;
@@ -39,7 +40,7 @@ use crate::memtable::partition_tree::{PartitionTreeConfig, PkId};
 use crate::memtable::stats::WriteMetrics;
 use crate::metrics::PARTITION_TREE_READ_STAGE_ELAPSED;
 use crate::read::{Batch, BatchBuilder};
-use crate::row_converter::{McmpRowCodec, RowCodec};
+use crate::row_converter::{CompositeRowCodec, RowCodec};
 
 /// Key of a partition.
 pub type PartitionKey = u32;
@@ -58,6 +59,7 @@ pub type PartitionRef = Arc<Partition>;
 impl Partition {
     /// Creates a new partition.
     pub fn new(metadata: RegionMetadataRef, config: &PartitionTreeConfig) -> Self {
+        common_telemetry::debug!("primary_key_encoding: {:?}", config.primary_key_encoding);
         Partition {
             inner: RwLock::new(Inner::new(metadata, config)),
             dedup: config.dedup,
@@ -69,7 +71,7 @@ impl Partition {
     pub fn write_with_key(
         &self,
         primary_key: &mut Vec<u8>,
-        row_codec: &McmpRowCodec,
+        row_codec: &CompositeRowCodec,
         key_value: KeyValue,
         is_partitioned: bool,
         metrics: &mut WriteMetrics,
@@ -90,6 +92,7 @@ impl Partition {
         // Key does not yet exist in shard or builder, encode and insert the full primary key.
         if is_partitioned {
             if self.primary_key_encoding == PrimaryKeyEncoding::Sparse {
+                common_telemetry::debug!("sparse primary key");
                 let sparse_key = primary_key.clone();
                 let pk_id = inner.shard_builder.write_with_key(
                     primary_key,
@@ -276,11 +279,9 @@ impl Partition {
             return PartitionKey::default();
         }
 
-        let Some((_, value)) = key_value.primary_keys().next() else {
-            return PartitionKey::default();
-        };
-
-        value.as_u32().unwrap().unwrap()
+        let key = key_value.partition_key();
+        common_telemetry::debug!("partition key: {:?}", key);
+        key
     }
 
     /// Returns true if the region can be partitioned.
@@ -374,25 +375,85 @@ impl PartitionReader {
 pub(crate) struct PrimaryKeyFilter {
     metadata: RegionMetadataRef,
     filters: Arc<Vec<SimpleFilterEvaluator>>,
-    codec: Arc<McmpRowCodec>,
+    codec: Arc<CompositeRowCodec>,
     offsets_buf: Vec<usize>,
+    offsets_map: HashMap<u32, usize>,
 }
 
 impl PrimaryKeyFilter {
     pub(crate) fn new(
         metadata: RegionMetadataRef,
         filters: Arc<Vec<SimpleFilterEvaluator>>,
-        codec: Arc<McmpRowCodec>,
+        codec: Arc<CompositeRowCodec>,
     ) -> Self {
         Self {
             metadata,
             filters,
             codec,
             offsets_buf: Vec::new(),
+            offsets_map: HashMap::new(),
         }
     }
 
+    pub(crate) fn prune_sparse_primary_key(&mut self, pk: &[u8]) -> bool {
+        if self.filters.is_empty() {
+            return true;
+        }
+
+        // no primary key, we simply return true.
+        if self.metadata.primary_key.is_empty() {
+            return true;
+        }
+
+        // evaluate filters against primary key values
+        let mut result = true;
+        self.offsets_map.clear();
+        for filter in &*self.filters {
+            if Partition::is_partition_column(filter.column_name()) {
+                continue;
+            }
+            let Some(column) = self.metadata.column_by_name(filter.column_name()) else {
+                continue;
+            };
+            // ignore filters that are not referencing primary key columns
+            if column.semantic_type != SemanticType::Tag {
+                continue;
+            }
+
+            if let Some(offset) = self
+                .codec
+                .has_column(pk, &mut self.offsets_map, column.column_id)
+            {
+                let value = match self
+                    .codec
+                    .sparse_decode_value_at(pk, offset, column.column_id)
+                {
+                    Ok(v) => v,
+                    Err(e) => {
+                        common_telemetry::error!(e; "Failed to decode primary key");
+                        return true;
+                    }
+                };
+
+                let scalar_value = value
+                    .try_to_scalar_value(&column.column_schema.data_type)
+                    .unwrap();
+                result &= filter.evaluate_scalar(&scalar_value).unwrap_or(true);
+            } else {
+                let scalar_value = Value::Null
+                    .try_to_scalar_value(&column.column_schema.data_type)
+                    .unwrap();
+                result &= filter.evaluate_scalar(&scalar_value).unwrap_or(true);
+            }
+        }
+
+        result
+    }
+
     pub(crate) fn prune_primary_key(&mut self, pk: &[u8]) -> bool {
+        if self.codec.is_sparse() {
+            return self.prune_sparse_primary_key(pk);
+        }
         if self.filters.is_empty() {
             return true;
         }
@@ -444,7 +505,7 @@ impl PrimaryKeyFilter {
 /// Structs to reuse across readers to avoid allocating for each reader.
 pub(crate) struct ReadPartitionContext {
     metadata: RegionMetadataRef,
-    row_codec: Arc<McmpRowCodec>,
+    row_codec: Arc<CompositeRowCodec>,
     projection: HashSet<ColumnId>,
     filters: Arc<Vec<SimpleFilterEvaluator>>,
     /// Buffer to store pk weights.
@@ -483,7 +544,7 @@ impl Drop for ReadPartitionContext {
 impl ReadPartitionContext {
     pub(crate) fn new(
         metadata: RegionMetadataRef,
-        row_codec: Arc<McmpRowCodec>,
+        row_codec: Arc<CompositeRowCodec>,
         projection: HashSet<ColumnId>,
         filters: Vec<SimpleFilterEvaluator>,
     ) -> ReadPartitionContext {
