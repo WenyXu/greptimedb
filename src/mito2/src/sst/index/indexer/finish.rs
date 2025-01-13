@@ -112,7 +112,6 @@ impl Indexer {
         let Some(mut indexer) = self.inverted_indexer.take() else {
             return true;
         };
-        common_telemetry::debug!("start finish inverted index");
         let err = match indexer.finish(puffin_writer).await {
             Ok((row_count, byte_count)) => {
                 self.fill_inverted_index_output(
@@ -121,7 +120,6 @@ impl Indexer {
                     byte_count,
                     &indexer,
                 );
-                common_telemetry::debug!("end finish inverted index");
                 return true;
             }
             Err(err) => err,

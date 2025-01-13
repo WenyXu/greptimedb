@@ -150,6 +150,12 @@ impl ColumnSchema {
         self
     }
 
+    pub fn with_inverted_index(&mut self, value: bool) {
+        let _ = self
+            .metadata
+            .insert(INVERTED_INDEX_KEY.to_string(), value.to_string());
+    }
+
     pub fn set_inverted_index(mut self, value: bool) -> Self {
         let _ = self
             .metadata

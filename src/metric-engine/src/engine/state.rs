@@ -20,10 +20,9 @@ use std::sync::Arc;
 use api::v1::SemanticType;
 use snafu::{OptionExt, ResultExt};
 use store_api::codec::PrimaryKeyEncoding;
-use store_api::metadata::{ColumnMetadata, RegionMetadataBuilder, RegionMetadataRef};
-use store_api::storage::RegionId;
+use store_api::metadata::{ColumnMetadata, RegionMetadataBuilder};
+use store_api::storage::{ColumnId, RegionId};
 
-use crate::codec::{Codec, CodecRef};
 use crate::error::{InvalidMetadataSnafu, PhysicalRegionNotFoundSnafu, Result};
 use crate::metrics::LOGICAL_REGION_COUNT;
 use crate::utils::to_data_region_id;
@@ -39,11 +38,7 @@ pub(crate) struct MetricEngineState {
     logical_regions: HashMap<RegionId, RegionId>,
     /// Cache for the columns of physical regions.
     /// The region id in key is the data region id.
-    physical_columns: HashMap<RegionId, HashSet<String>>,
-    /// Cache for the logical region metadatas.
-    logical_region_metadatas: HashMap<RegionId, RegionMetadataRef>,
-    /// Cache for the logical region codec.
-    logical_region_codec: HashMap<RegionId, CodecRef>,
+    physical_columns: HashMap<RegionId, HashMap<String, ColumnId>>,
     /// Cache for the logical region columns.
     logical_columns: HashMap<RegionId, Vec<ColumnMetadata>>,
 }
@@ -56,7 +51,7 @@ impl MetricEngineState {
     pub fn add_physical_region(
         &mut self,
         physical_region_id: RegionId,
-        physical_columns: HashSet<String>,
+        physical_columns: HashMap<String, ColumnId>,
     ) {
         let physical_region_id = to_data_region_id(physical_region_id);
         self.physical_regions
@@ -70,13 +65,21 @@ impl MetricEngineState {
     pub fn add_physical_columns(
         &mut self,
         physical_region_id: RegionId,
-        physical_columns: impl IntoIterator<Item = String>,
+        physical_columns: impl IntoIterator<Item = (String, ColumnId)>,
     ) {
         let physical_region_id = to_data_region_id(physical_region_id);
         let columns = self.physical_columns.get_mut(&physical_region_id).unwrap();
-        for col in physical_columns {
-            columns.insert(col);
+        for (col, id) in physical_columns {
+            columns.insert(col, id);
         }
+    }
+
+    /// Get the physical columns of the physical region.
+    pub fn get_physical_columns(
+        &self,
+        physical_region_id: RegionId,
+    ) -> Option<&HashMap<String, ColumnId>> {
+        self.physical_columns.get(&physical_region_id)
     }
 
     /// # Panic
@@ -122,23 +125,15 @@ impl MetricEngineState {
                 .build()
                 .context(InvalidMetadataSnafu)?,
         );
-        self.logical_region_codec
-            .insert(logical_region_id, Arc::new(Codec::new(&logical_metadata)));
-        self.logical_region_metadatas
-            .insert(logical_region_id, logical_metadata);
         self.logical_columns.insert(logical_region_id, columns);
         Ok(())
-    }
-
-    pub fn get_region_codec(&self, logical_region_id: RegionId) -> Option<&CodecRef> {
-        self.logical_region_codec.get(&logical_region_id)
     }
 
     pub fn get_physical_region_id(&self, logical_region_id: RegionId) -> Option<RegionId> {
         self.logical_regions.get(&logical_region_id).copied()
     }
 
-    pub fn physical_columns(&self) -> &HashMap<RegionId, HashSet<String>> {
+    pub fn physical_columns(&self) -> &HashMap<RegionId, HashMap<String, ColumnId>> {
         &self.physical_columns
     }
 
@@ -192,8 +187,6 @@ impl MetricEngineState {
     }
 
     pub fn invalid_logical_column_cache(&mut self, logical_region_id: RegionId) {
-        self.logical_region_metadatas.remove(&logical_region_id);
-        self.logical_region_codec.remove(&logical_region_id);
         self.logical_columns.remove(&logical_region_id);
     }
 

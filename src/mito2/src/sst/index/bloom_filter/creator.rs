@@ -193,14 +193,11 @@ impl BloomFilterIndexer {
         guard.inc_row_count(n);
 
         // Tags
-        for (col_id, value) in self.codec.decode(batch.primary_key())? {
-            let Some(creator) = self.creators.get_mut(&col_id) else {
+        for ((col_id, _), field, value) in self.codec.decode(batch.primary_key())? {
+            let Some(creator) = self.creators.get_mut(col_id) else {
                 continue;
             };
-            let Some((_, field)) = self.codec.field_encoder(&col_id) else {
-                common_telemetry::warn!("field encoder not found for column: {:?}", col_id);
-                continue;
-            };
+
             let elems = value
                 .map(|v| {
                     let mut buf = vec![];

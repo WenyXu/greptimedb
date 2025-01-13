@@ -69,7 +69,6 @@ impl InvertedIndexCreator for SortIndexCreator {
 
     /// Finalizes the sorting for all indexes and writes them using the inverted index writer
     async fn finish(&mut self, writer: &mut dyn InvertedIndexWriter) -> Result<()> {
-        common_telemetry::debug!("index creator start finish inverted index");
         let mut output_row_count = None;
         for (index_name, mut sorter) in self.sorters.drain() {
             let SortOutput {

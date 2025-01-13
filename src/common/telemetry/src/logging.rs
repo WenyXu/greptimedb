@@ -360,12 +360,9 @@ pub fn init_global_logging(
                 } else {
                     None
                 };
-            let stdout_logging_layer = stdout_logging_layer.with_filter(filter.clone());
-            let file_logging_layer = file_logging_layer.with_filter(filter.clone());
-            let err_file_logging_layer = err_file_logging_layer.with_filter(filter.clone());
-            let slow_query_logging_layer = slow_query_logging_layer.with_filter(filter.clone());
 
             Registry::default()
+                .with(dyn_filter)
                 .with(tokio_console_layer)
                 .with(stdout_logging_layer)
                 .with(file_logging_layer)

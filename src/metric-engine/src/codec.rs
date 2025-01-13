@@ -13,14 +13,12 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use api::v1::value::ValueData;
 use api::v1::{ColumnDataType, ColumnSchema, Row, Rows, SemanticType, Value};
-use datatypes::prelude::ConcreteDataType;
 use datatypes::value::ValueRef;
-use mito2::row_converter::{RowCodec, SortField, SparseRowCodec};
-use store_api::metadata::RegionMetadataRef;
+use mito2::row_converter::sparse::MetricRowCodec;
+use mito2::row_converter::RowCodec;
 use store_api::metric_engine_consts::{
     DATA_SCHEMA_ENCODED_PRIMARY_KEY_COLUMN_NAME, DATA_SCHEMA_TABLE_ID_COLUMN_NAME,
     DATA_SCHEMA_TSID_COLUMN_NAME,
@@ -30,35 +28,14 @@ use store_api::storage::ColumnId;
 
 use crate::error::Result;
 
-pub type CodecRef = Arc<Codec>;
-
 pub struct Codec {
-    pub(crate) codec: SparseRowCodec,
-    pub(crate) region_metadata: RegionMetadataRef,
+    pub(crate) codec: MetricRowCodec,
 }
 
 impl Codec {
-    pub fn new(region_metadata: &RegionMetadataRef) -> Self {
-        let mut fields = Vec::with_capacity(region_metadata.primary_key.len() + 2);
-        fields.push((
-            ReservedColumnId::table_id(),
-            SortField::new(ConcreteDataType::uint32_datatype()),
-        ));
-        fields.push((
-            ReservedColumnId::tsid(),
-            SortField::new(ConcreteDataType::uint64_datatype()),
-        ));
-        for column in region_metadata.column_metadatas.iter() {
-            if column.semantic_type == SemanticType::Tag {
-                fields.push((
-                    column.column_id,
-                    SortField::new(column.column_schema.data_type.clone()),
-                ));
-            }
-        }
+    pub fn new() -> Self {
         Self {
-            codec: SparseRowCodec::new_partial_fields(fields),
-            region_metadata: region_metadata.clone(),
+            codec: MetricRowCodec::new(),
         }
     }
 
@@ -102,8 +79,8 @@ pub struct RowsIter {
 }
 
 impl RowsIter {
-    pub fn new(rows: Rows, metadata: &RegionMetadataRef) -> Self {
-        let index: IterIndex = IterIndex::new(&rows.schema, metadata);
+    pub fn new(rows: Rows, name_to_column_id: &HashMap<String, ColumnId>) -> Self {
+        let index: IterIndex = IterIndex::new(&rows.schema, name_to_column_id);
         Self { rows, index }
     }
 
@@ -167,71 +144,48 @@ struct IterIndex {
 }
 
 impl IterIndex {
-    fn new(row_schema: &[ColumnSchema], metadata: &RegionMetadataRef) -> Self {
-        let name_to_index = row_schema
-            .iter()
-            .enumerate()
-            .map(|(idx, col)| (col.column_name.as_str(), idx))
-            .collect::<HashMap<_, _>>();
-
-        let mut indices = Vec::with_capacity(metadata.column_metadatas.len());
-        let mut num_primary_key_column = 0;
-        // TODO: internal column should be added
-
-        for (pk_column_id, name) in [
-            (
-                ReservedColumnId::table_id(),
-                DATA_SCHEMA_TABLE_ID_COLUMN_NAME,
-            ),
-            (ReservedColumnId::tsid(), DATA_SCHEMA_TSID_COLUMN_NAME),
-        ] {
-            if let Some(index) = name_to_index.get(name) {
-                indices.push(ValueIndex {
-                    column_id: pk_column_id,
-                    index: *index,
+    fn new(row_schema: &[ColumnSchema], name_to_column_id: &HashMap<String, ColumnId>) -> Self {
+        let mut reserved_indices = Vec::with_capacity(2);
+        let mut primary_key_indices = Vec::with_capacity(row_schema.len());
+        let mut field_indices = Vec::with_capacity(row_schema.len());
+        let mut ts_index = None;
+        for (idx, col) in row_schema.iter().enumerate() {
+            if col.semantic_type == SemanticType::Tag as i32 {
+                if col.column_name == DATA_SCHEMA_TABLE_ID_COLUMN_NAME {
+                    reserved_indices.push(ValueIndex {
+                        column_id: ReservedColumnId::table_id(),
+                        index: idx,
+                    });
+                } else if col.column_name == DATA_SCHEMA_TSID_COLUMN_NAME {
+                    reserved_indices.push(ValueIndex {
+                        column_id: ReservedColumnId::tsid(),
+                        index: idx,
+                    });
+                } else {
+                    primary_key_indices.push(ValueIndex {
+                        column_id: *name_to_column_id.get(&col.column_name).unwrap(),
+                        index: idx,
+                    });
+                }
+            } else if col.semantic_type == SemanticType::Field as i32 {
+                field_indices.push(ValueIndex {
+                    column_id: *name_to_column_id.get(&col.column_name).unwrap(),
+                    index: idx,
                 });
-                num_primary_key_column += 1;
-            }
-        }
-
-        for pk_column_id in &metadata.primary_key {
-            // Safety: Id comes from primary key.
-            let column = metadata.column_by_id(*pk_column_id).unwrap();
-            if let Some(index) = name_to_index.get(column.column_schema.name.as_str()) {
-                indices.push(ValueIndex {
-                    column_id: *pk_column_id,
-                    index: *index,
-                });
-                num_primary_key_column += 1;
-            }
-        }
-
-        // Get timestamp index.
-        // Safety: time index must exist
-        let ts_index = name_to_index
-            .get(metadata.time_index_column().column_schema.name.as_str())
-            .unwrap();
-        indices.push(ValueIndex {
-            column_id: metadata.time_index_column().column_id,
-            index: *ts_index,
-        });
-
-        // Iterate columns and find field columns.
-        for column in metadata.field_columns() {
-            // Get index in request for each field column.
-            if let Some(index) = name_to_index.get(column.column_schema.name.as_str()) {
-                indices.push(ValueIndex {
-                    column_id: column.column_id,
-                    index: *index,
+            } else if col.semantic_type == SemanticType::Timestamp as i32 {
+                ts_index = Some(ValueIndex {
+                    column_id: *name_to_column_id.get(&col.column_name).unwrap(),
+                    index: idx,
                 });
             }
         }
-
-        common_telemetry::debug!(
-            "indices: {:?}, num_primary_key_column: {:?}",
-            indices,
-            num_primary_key_column
-        );
+        let num_primary_key_column = primary_key_indices.len() + reserved_indices.len();
+        let indices = reserved_indices
+            .into_iter()
+            .chain(primary_key_indices)
+            .chain(ts_index)
+            .chain(field_indices)
+            .collect();
         IterIndex {
             indices,
             num_primary_key_column,

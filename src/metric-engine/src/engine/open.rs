@@ -137,7 +137,7 @@ impl MetricEngineInner {
             // recover physical column names
             let physical_column_names = physical_columns
                 .into_iter()
-                .map(|col| col.column_schema.name)
+                .map(|col| (col.column_schema.name, col.column_id))
                 .collect();
             state.add_physical_region(physical_region_id, physical_column_names);
             // recover logical regions

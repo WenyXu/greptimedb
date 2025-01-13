@@ -16,6 +16,7 @@ use api::v1::SemanticType;
 use common_error::ext::ErrorExt;
 use common_error::status_code::StatusCode;
 use common_telemetry::{debug, info, warn};
+use datatypes::schema::{SkippingIndexOptions, SkippingIndexType};
 use mito2::engine::MitoEngine;
 use snafu::ResultExt;
 use store_api::metadata::ColumnMetadata;
@@ -142,6 +143,13 @@ impl DataRegion {
 
                 c.column_id = new_column_id_start + delta as u32;
                 c.column_schema.set_nullable();
+                c.column_schema
+                    .set_skipping_options(&SkippingIndexOptions {
+                        granularity: 102400,
+                        index_type: SkippingIndexType::BloomFilter,
+                    })
+                    .unwrap();
+                c.column_schema.with_inverted_index(false);
 
                 Ok(AddColumn {
                     column_metadata: c.clone(),

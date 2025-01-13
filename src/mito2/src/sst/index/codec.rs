@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use datatypes::data_type::ConcreteDataType;
 use datatypes::value::{Value, ValueRef};
 use memcomparable::Serializer;
@@ -22,7 +20,7 @@ use store_api::metadata::RegionMetadataRef;
 use store_api::storage::ColumnId;
 
 use crate::error::{FieldTypeMismatchSnafu, IndexEncodeNullSnafu, Result};
-use crate::row_converter::{CompositeRowCodec, CompositeValues, RowCodec, SortField};
+use crate::row_converter::{CompositeRowCodec, RowCodec, SortField};
 
 /// Encodes index values according to their data types for sorting and storage use.
 pub struct IndexValueCodec;
@@ -65,70 +63,82 @@ pub struct IndexValuesCodec {
     /// The decoder for the primary key.
     decoder: CompositeRowCodec,
     /// The data types of tag columns.
-    fields: HashMap<ColumnId, (String, SortField)>,
-    /// The ordered list of primary keys.
-    ordered_fields: Vec<ColumnId>,
+    fields: Vec<SortField>,
+    column_ids: Vec<(ColumnId, String)>,
 }
 
 impl IndexValuesCodec {
     /// Creates a new `IndexValuesCodec` from a list of `ColumnMetadata` of tag columns.
     pub fn from_tag_columns(region_metadata: &RegionMetadataRef) -> Self {
         let decoder = CompositeRowCodec::new(region_metadata);
-        let fields = region_metadata
+        let (column_ids, fields): (Vec<_>, Vec<_>) = region_metadata
             .primary_key_columns()
             .map(|column| {
                 (
-                    column.column_id,
-                    (
-                        column.column_id.to_string(),
-                        SortField::new(column.column_schema.data_type.clone()),
-                    ),
+                    (column.column_id, column.column_id.to_string()),
+                    SortField::new(column.column_schema.data_type.clone()),
                 )
             })
-            .collect::<HashMap<_, _>>();
-
+            .unzip();
         Self {
             decoder,
             fields,
-            ordered_fields: region_metadata.primary_key.clone(),
+            column_ids,
         }
     }
 
-    /// Returns the encoder for the given column id.
-    pub fn field_encoder(&self, column_id: &ColumnId) -> Option<&(String, SortField)> {
-        self.fields.get(column_id)
-    }
-
-    /// Decodes a primary key into its corresponding column ids, data types and values.
     pub fn decode(
         &self,
         primary_key: &[u8],
-    ) -> Result<Vec<(ColumnId, Option<Value>)>> {
-        let values = self.decoder.decode(primary_key)?;
-        match values {
-            CompositeValues::Dense(values) => {
-                let iter =
-                    values
-                        .into_iter()
-                        .zip(&self.ordered_fields)
-                        .map(|(value, column_id)| {
-                            if value.is_null() {
-                                (*column_id, None)
-                            } else {
-                                (*column_id, Some(value))
-                            }
-                        });
+    ) -> Result<impl Iterator<Item = (&(ColumnId, String), &SortField, Option<Value>)>> {
+        // TODO(weny): refactor this f**king part
+        let values = self.decoder.decode_dense(primary_key)?;
 
-                Ok(iter.collect())
-            }
-            CompositeValues::Sparse(values) => {
-                let iter = values
-                    .into_iter()
-                    .map(|(column_id, value)| (column_id, Some(value)));
-                Ok(iter.collect())
-            }
-        }
+        let iter = values
+            .into_iter()
+            .zip(&self.column_ids)
+            .zip(&self.fields)
+            .map(|((value, column_id), encoder)| {
+                if value.is_null() {
+                    (column_id, encoder, None)
+                } else {
+                    (column_id, encoder, Some(value))
+                }
+            });
+
+        Ok(iter)
     }
+
+    // /// Decodes a primary key into its corresponding column ids, data types and values.
+    // pub fn decode(
+    //     &self,
+    //     primary_key: &[u8],
+    // ) -> Result<Vec<(ColumnId, Option<Value>)>> {
+    //     let values = self.decoder.decode(primary_key)?;
+    //     match values {
+    //         CompositeValues::Dense(values) => {
+    //             let iter =
+    //                 values
+    //                     .into_iter()
+    //                     .zip(&self.ordered_fields)
+    //                     .map(|(value, column_id)| {
+    //                         if value.is_null() {
+    //                             (*column_id, None)
+    //                         } else {
+    //                             (*column_id, Some(value))
+    //                         }
+    //                     });
+
+    //             Ok(iter.collect())
+    //         }
+    //         CompositeValues::Sparse(values) => {
+    //             let iter = values
+    //                 .into_iter()
+    //                 .map(|(column_id, value)| (column_id, Some(value)));
+    //             Ok(iter.collect())
+    //         }
+    //     }
+    // }
 }
 
 #[cfg(test)]
@@ -210,16 +220,14 @@ mod tests {
         let codec = IndexValuesCodec::from_tag_columns(&region_metadata);
         let mut iter = codec.decode(&primary_key).unwrap();
 
-        let (column_id, value) = iter.next().unwrap();
-        assert_eq!(column_id, 1);
-        let (col_id_str, field) = codec.field_encoder(&1).unwrap();
+        let ((column_id, col_id_str), field, value) = iter.next().unwrap();
+        assert_eq!(*column_id, 1);
         assert_eq!(col_id_str, "1");
         assert_eq!(field, &SortField::new(ConcreteDataType::string_datatype()));
         assert_eq!(value, None);
 
-        let (column_id, value) = iter.next().unwrap();
-        assert_eq!(column_id, 2);
-        let (col_id_str, field) = codec.field_encoder(&2).unwrap();
+        let ((column_id, col_id_str), field, value) = iter.next().unwrap();
+        assert_eq!(*column_id, 2);
         assert_eq!(col_id_str, "2");
         assert_eq!(field, &SortField::new(ConcreteDataType::int64_datatype()));
         assert_eq!(value, Some(Value::Int64(10)));

@@ -27,7 +27,7 @@ use store_api::region_request::{AffectedRows, RegionPutRequest};
 use store_api::storage::{RegionId, TableId};
 
 use super::state::primary_key_encoding;
-use crate::codec::{CodecRef, RowsIter};
+use crate::codec::RowsIter;
 use crate::engine::MetricEngineInner;
 use crate::error::{
     ColumnNotFoundSnafu, ForbiddenPhysicalAlterSnafu, LogicalRegionNotFoundSnafu,
@@ -87,24 +87,13 @@ impl MetricEngineInner {
         self.verify_put_request(logical_region_id, physical_region_id, &request)
             .await?;
 
-        // TODO(weny): refactor it
-        let _ = self
-            .logical_region_metadata(physical_region_id, logical_region_id)
-            .await?;
-        let codec = self
-            .state
-            .read()
-            .unwrap()
-            .get_region_codec(logical_region_id)
-            .with_context(|| LogicalRegionNotFoundSnafu {
-                region_id: logical_region_id,
-            })?
-            .clone();
-
         // write to data region
-
         // TODO: retrieve table name
-        self.modify_rows(logical_region_id.table_id(), &mut request.rows, &codec)?;
+        self.modify_rows(
+            physical_region_id,
+            logical_region_id.table_id(),
+            &mut request.rows,
+        )?;
         if primary_key_encoding() == PrimaryKeyEncoding::Sparse {
             request.hint = WriteHint::PRIMARY_KEY_ENCODED | WriteHint::SPARSE_KEY_ENCODING;
         }
@@ -143,7 +132,7 @@ impl MetricEngineInner {
                 })?;
         for col in &request.rows.schema {
             ensure!(
-                physical_columns.contains(&col.column_name),
+                physical_columns.contains_key(&col.column_name),
                 ColumnNotFoundSnafu {
                     name: col.column_name.clone(),
                     region_id: logical_region_id,
@@ -157,7 +146,12 @@ impl MetricEngineInner {
     /// Perform metric engine specific logic to incoming rows.
     /// - Add table_id column
     /// - Generate tsid
-    fn modify_rows(&self, table_id: TableId, rows: &mut Rows, codec: &CodecRef) -> Result<()> {
+    fn modify_rows(
+        &self,
+        physical_region_id: RegionId,
+        table_id: TableId,
+        rows: &mut Rows,
+    ) -> Result<()> {
         // gather tag column indices
         let tag_col_indices = rows
             .schema
@@ -165,12 +159,17 @@ impl MetricEngineInner {
             .enumerate()
             .filter_map(|(idx, col)| {
                 if col.semantic_type == SemanticType::Tag as i32 {
-                    Some((idx, col.column_name.clone()))
+                    Some((idx, col.column_name.as_str()))
                 } else {
                     None
                 }
             })
             .collect::<Vec<_>>();
+
+        // fill internal columns
+        for row in &mut rows.rows {
+            Self::fill_internal_columns(table_id, &tag_col_indices, row);
+        }
 
         // add table_name column
         rows.schema.push(ColumnSchema {
@@ -189,34 +188,33 @@ impl MetricEngineInner {
             options: None,
         });
 
-        // fill internal columns
-        for row in &mut rows.rows {
-            Self::fill_internal_columns(table_id, &tag_col_indices, row);
-        }
-
         if primary_key_encoding() == PrimaryKeyEncoding::Sparse {
             let input = std::mem::take(rows);
-            let encoded = self.encode_primary_key(codec, input)?;
+            let encoded = self.encode_primary_key(physical_region_id, input)?;
             *rows = encoded;
         }
 
         Ok(())
     }
 
-    fn encode_primary_key(&self, codec: &CodecRef, rows: Rows) -> Result<Rows> {
+    fn encode_primary_key(&self, physical_region_id: RegionId, rows: Rows) -> Result<Rows> {
         common_telemetry::debug!("encode primary key: {:?}", rows);
-        common_telemetry::debug!("codec: {:?}", codec.codec);
-        let iter = RowsIter::new(rows, &codec.region_metadata);
-        let encoded = codec.encode_rows(iter)?;
+        let iter = {
+            let state = self.state.read().unwrap();
+            let name_to_id = state
+                .physical_columns()
+                .get(&physical_region_id)
+                .with_context(|| PhysicalRegionNotFoundSnafu {
+                    region_id: physical_region_id,
+                })?;
+            RowsIter::new(rows, name_to_id)
+        };
+        let encoded = self.codec.encode_rows(iter)?;
         Ok(encoded)
     }
 
     /// Fills internal columns of a row with table name and a hash of tag values.
-    fn fill_internal_columns(
-        table_id: TableId,
-        tag_col_indices: &[(usize, String)],
-        row: &mut Row,
-    ) {
+    fn fill_internal_columns(table_id: TableId, tag_col_indices: &[(usize, &str)], row: &mut Row) {
         let mut hasher = mur3::Hasher128::with_seed(TSID_HASH_SEED);
         for (idx, name) in tag_col_indices {
             let tag = &row.values[*idx];

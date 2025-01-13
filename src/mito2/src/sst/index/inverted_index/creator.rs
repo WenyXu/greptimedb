@@ -180,16 +180,11 @@ impl InvertedIndexer {
         let n = batch.num_rows();
         guard.inc_row_count(n);
 
-        for (col_id, value) in self.codec.decode(batch.primary_key())? {
-            if !self.indexed_column_ids.contains(&col_id) {
+        for ((col_id, col_id_str), field, value) in self.codec.decode(batch.primary_key())? {
+            if !self.indexed_column_ids.contains(col_id) {
                 continue;
             }
 
-            // Safety: col_id is always in the indexed_column_ids
-            let Some((col_id_str, field)) = self.codec.field_encoder(&col_id) else {
-                common_telemetry::warn!("field encoder not found for column: {:?}", col_id);
-                continue;
-            };
             if let Some(value) = value.as_ref() {
                 self.value_buf.clear();
                 IndexValueCodec::encode_nonnull_value(
@@ -259,14 +254,12 @@ impl InvertedIndexer {
 
         let (tx, rx) = duplex(PIPE_BUFFER_SIZE_FOR_SENDING_BLOB);
         let mut index_writer = InvertedIndexBlobWriter::new(tx.compat_write());
-        common_telemetry::debug!("start finish inverted index");
 
         let (index_finish, puffin_add_blob) = futures::join!(
             self.index_creator.finish(&mut index_writer),
             puffin_writer.put_blob(INDEX_BLOB_TYPE, rx.compat(), PutOptions::default()),
         );
 
-        common_telemetry::debug!("end finish inverted index");
         match (
             puffin_add_blob.context(PuffinAddBlobSnafu),
             index_finish.context(IndexFinishSnafu),
@@ -283,12 +276,6 @@ impl InvertedIndexer {
                 guard.inc_byte_count(written_bytes);
             }
         }
-
-        // let mut index_writer = InvertedIndexBlobWriter::new(tokio::io::stdout().compat_write());
-        // self.index_creator
-        //     .finish(&mut index_writer)
-        //     .await
-        //     .context(IndexFinishSnafu)?;
 
         Ok(())
     }

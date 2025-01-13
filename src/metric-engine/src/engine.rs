@@ -45,6 +45,7 @@ use store_api::region_request::RegionRequest;
 use store_api::storage::{RegionId, ScanRequest};
 
 use self::state::MetricEngineState;
+use crate::codec::Codec;
 use crate::data_region::DataRegion;
 use crate::error::{self, Result, UnsupportedRegionRequestSnafu};
 use crate::metadata_region::MetadataRegion;
@@ -132,7 +133,6 @@ impl RegionEngine for MetricEngine {
     ) -> Result<RegionResponse, BoxedError> {
         let mut extension_return_value = HashMap::new();
 
-        common_telemetry::info!("handle request: {:?}", request);
         let result = match request {
             RegionRequest::Put(put) => self.inner.put_region(region_id, put).await,
             RegionRequest::Create(create) => {
@@ -265,6 +265,7 @@ impl MetricEngine {
                 metadata_region,
                 data_region,
                 state: RwLock::default(),
+                codec: Codec::new(),
             }),
         }
     }
@@ -305,6 +306,7 @@ struct MetricEngineInner {
     metadata_region: MetadataRegion,
     data_region: DataRegion,
     state: RwLock<MetricEngineState>,
+    codec: Codec,
 }
 
 #[cfg(test)]

@@ -67,6 +67,10 @@ pub trait RowCodec: Send + Sync {
     /// Decode row values from bytes.
     fn decode(&self, bytes: &[u8]) -> Result<CompositeValues>;
 
+    fn decode_dense(&self, _bytes: &[u8]) -> Result<Vec<Value>> {
+        unimplemented!()
+    }
+
     fn estimated_size(&self) -> usize;
 }
 
@@ -482,6 +486,13 @@ impl RowCodec for CompositeRowCodec {
         match self {
             CompositeRowCodec::Full(codec) => codec.decode(bytes),
             CompositeRowCodec::Sparse(codec) => codec.decode(bytes),
+        }
+    }
+
+    fn decode_dense(&self, bytes: &[u8]) -> Result<Vec<Value>> {
+        match self {
+            CompositeRowCodec::Full(codec) => codec.decode_values(bytes),
+            CompositeRowCodec::Sparse(codec) => codec.decode_dense(bytes),
         }
     }
 

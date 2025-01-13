@@ -12,21 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use api::v1::SemanticType;
 use common_error::ext::BoxedError;
 use common_telemetry::{info, warn};
 use common_time::{Timestamp, FOREVER};
 use datatypes::data_type::ConcreteDataType;
-use datatypes::schema::ColumnSchema;
+use datatypes::schema::{ColumnSchema, SkippingIndexOptions, SkippingIndexType};
 use datatypes::value::Value;
 use mito2::engine::MITO_ENGINE_NAME;
 use object_store::util::join_dir;
 use snafu::{ensure, OptionExt, ResultExt};
 use store_api::metadata::ColumnMetadata;
 use store_api::metric_engine_consts::{
-    ALTER_PHYSICAL_EXTENSION_KEY, DATA_REGION_SUBDIR, DATA_SCHEMA_ENCODED_PRIMARY_KEY_COLUMN_NAME, DATA_SCHEMA_TABLE_ID_COLUMN_NAME, DATA_SCHEMA_TSID_COLUMN_NAME, LOGICAL_TABLE_METADATA_KEY, METADATA_REGION_SUBDIR, METADATA_SCHEMA_KEY_COLUMN_INDEX, METADATA_SCHEMA_KEY_COLUMN_NAME, METADATA_SCHEMA_TIMESTAMP_COLUMN_INDEX, METADATA_SCHEMA_TIMESTAMP_COLUMN_NAME, METADATA_SCHEMA_VALUE_COLUMN_INDEX, METADATA_SCHEMA_VALUE_COLUMN_NAME
+    ALTER_PHYSICAL_EXTENSION_KEY, DATA_REGION_SUBDIR, DATA_SCHEMA_ENCODED_PRIMARY_KEY_COLUMN_NAME,
+    DATA_SCHEMA_TABLE_ID_COLUMN_NAME, DATA_SCHEMA_TSID_COLUMN_NAME, LOGICAL_TABLE_METADATA_KEY,
+    METADATA_REGION_SUBDIR, METADATA_SCHEMA_KEY_COLUMN_INDEX, METADATA_SCHEMA_KEY_COLUMN_NAME,
+    METADATA_SCHEMA_TIMESTAMP_COLUMN_INDEX, METADATA_SCHEMA_TIMESTAMP_COLUMN_NAME,
+    METADATA_SCHEMA_VALUE_COLUMN_INDEX, METADATA_SCHEMA_VALUE_COLUMN_NAME,
 };
 use store_api::mito_engine_options::{APPEND_MODE_KEY, TTL_KEY};
 use store_api::region_engine::RegionEngine;
@@ -106,8 +110,8 @@ impl MetricEngineInner {
         let physical_column_set = create_data_region_request
             .column_metadatas
             .iter()
-            .map(|metadata| metadata.column_schema.name.clone())
-            .collect::<HashSet<_>>();
+            .map(|metadata| (metadata.column_schema.name.clone(), metadata.column_id))
+            .collect::<HashMap<_, _>>();
         self.mito
             .handle_request(
                 data_region_id,
@@ -165,9 +169,11 @@ impl MetricEngineInner {
 
         // check if the logical region already exist
         if self
-            .metadata_region
-            .is_logical_region_exists(metadata_region_id, logical_region_id)
-            .await?
+            .state
+            .read()
+            .unwrap()
+            .logical_regions()
+            .contains_key(&logical_region_id)
         {
             info!("Create a existing logical region {logical_region_id}. Skipped");
             return Ok(data_region_id);
@@ -186,7 +192,7 @@ impl MetricEngineInner {
                         region_id: data_region_id,
                     })?;
             for col in &request.column_metadatas {
-                if !physical_columns.contains(&col.column_schema.name) {
+                if !physical_columns.contains_key(&col.column_schema.name) {
                     // Multi-field on physical table is explicit forbidden at present
                     // TODO(ruihang): support multi-field on both logical and physical column
                     ensure!(
@@ -279,15 +285,9 @@ impl MetricEngineInner {
             .add_columns(data_region_id, new_columns)
             .await?;
 
-        // safety: previous step has checked this
-        self.state.write().unwrap().add_physical_columns(
-            data_region_id,
-            new_columns
-                .iter()
-                .map(|meta| meta.column_schema.name.clone()),
-        );
-        info!("Create region {logical_region_id} leads to adding columns {new_columns:?} to physical region {data_region_id}");
-        PHYSICAL_COLUMN_COUNT.add(new_columns.len() as _);
+        if new_columns.is_empty() {
+            return Ok(());
+        }
 
         // correct the column id
         let after_alter_physical_schema = self.data_region.physical_columns(data_region_id).await?;
@@ -316,6 +316,16 @@ impl MetricEngineInner {
                 *col = (*column_metadata).clone();
             }
         }
+
+        // safety: previous step has checked this
+        self.state.write().unwrap().add_physical_columns(
+            data_region_id,
+            new_columns
+                .iter()
+                .map(|meta| (meta.column_schema.name.clone(), meta.column_id)),
+        );
+        info!("Create region {logical_region_id} leads to adding columns {new_columns:?} to physical region {data_region_id}");
+        PHYSICAL_COLUMN_COUNT.add(new_columns.len() as _);
 
         Ok(())
     }
@@ -523,7 +533,13 @@ impl MetricEngineInner {
                 DATA_SCHEMA_TABLE_ID_COLUMN_NAME,
                 ConcreteDataType::uint32_datatype(),
                 false,
-            ),
+            )
+            .set_inverted_index(false)
+            .with_skipping_options(SkippingIndexOptions {
+                granularity: 102400,
+                index_type: SkippingIndexType::BloomFilter,
+            })
+            .unwrap(),
         };
         let tsid_col = ColumnMetadata {
             column_id: ReservedColumnId::tsid(),
@@ -532,7 +548,13 @@ impl MetricEngineInner {
                 DATA_SCHEMA_TSID_COLUMN_NAME,
                 ConcreteDataType::uint64_datatype(),
                 false,
-            ),
+            )
+            .set_inverted_index(false)
+            .with_skipping_options(SkippingIndexOptions {
+                granularity: 102400,
+                index_type: SkippingIndexType::BloomFilter,
+            })
+            .unwrap(),
         };
         [metric_name_col, tsid_col]
     }
