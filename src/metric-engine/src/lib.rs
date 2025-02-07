@@ -54,6 +54,8 @@
 
 pub mod config;
 mod data_region;
+mod dict;
+pub use dict::Dict;
 pub mod engine;
 pub mod error;
 mod metadata_region;

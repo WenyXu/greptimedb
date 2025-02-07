@@ -6629,6 +6629,7 @@ dependencies = [
 name = "metric-engine"
 version = "0.12.0"
 dependencies = [
+ "ahash 0.8.11",
  "api",
  "aquamarine",
  "async-trait",
