@@ -63,6 +63,13 @@ pub enum RegionRequest {
 }
 
 impl RegionRequest {
+    pub fn into_create_request(self) -> Option<RegionCreateRequest> {
+        match self {
+            RegionRequest::Create(create) => Some(create),
+            _ => None,
+        }
+    }
+
     /// Convert [Body](region_request::Body) to a group of [RegionRequest] with region id.
     /// Inserts/Deletes request might become multiple requests. Others are one-to-one.
     pub fn try_from_request_body(body: region_request::Body) -> Result<Vec<(RegionId, Self)>> {

@@ -59,7 +59,7 @@ use store_api::region_engine::{
     SettableRegionRoleState,
 };
 use store_api::region_request::{
-    AffectedRows, RegionCloseRequest, RegionOpenRequest, RegionRequest,
+    AffectedRows, RegionCloseRequest, RegionCreateRequest, RegionOpenRequest, RegionRequest,
 };
 use store_api::storage::RegionId;
 use tokio::sync::{Semaphore, SemaphorePermit};
@@ -156,6 +156,13 @@ impl RegionServer {
         request: RegionRequest,
     ) -> Result<RegionResponse> {
         self.inner.handle_request(region_id, request).await
+    }
+
+    pub async fn handle_create_request(
+        &self,
+        requests: Vec<(RegionId, RegionCreateRequest)>,
+    ) -> Result<RegionResponse> {
+        self.inner.handle_batch_create_requests(requests).await
     }
 
     async fn table_provider(&self, region_id: RegionId) -> Result<Arc<dyn TableProvider>> {
@@ -380,23 +387,48 @@ impl RegionServerHandler for RegionServer {
                 .map_err(BoxedError::new)
                 .context(ExecuteGrpcRequestSnafu)?
         } else {
-            let mut results = Vec::with_capacity(requests.len());
-            // FIXME(jeremy, ruihang): Once the engine supports merged calls, we should immediately
-            // modify this part to avoid inefficient serial loop calls.
-            for (region_id, req) in requests {
-                let span = tracing_context.attach(info_span!(
-                    "RegionServer::handle_region_request",
-                    region_id = region_id.to_string()
-                ));
+            if matches!(requests.first().unwrap().1, RegionRequest::Create(_)) {
                 let result = self
-                    .handle_request(region_id, req)
-                    .trace(span)
+                    .inner
+                    .handle_batch_create_requests(
+                        requests
+                            .into_iter()
+                            .map(|(region_id, req)| (region_id, req.into_create_request().unwrap()))
+                            .collect(),
+                    )
                     .await
                     .map_err(BoxedError::new)
-                    .context(ExecuteGrpcRequestSnafu)?;
-                results.push(result);
+                    .context(ExecuteGrpcRequestSnafu);
+
+                return result.map(|result| RegionResponseV1 {
+                    header: Some(ResponseHeader {
+                        status: Some(Status {
+                            status_code: StatusCode::Success as _,
+                            ..Default::default()
+                        }),
+                    }),
+                    affected_rows: result.affected_rows as _,
+                    extensions: result.extensions,
+                });
+            } else {
+                let mut results = Vec::with_capacity(requests.len());
+                // FIXME(jeremy, ruihang): Once the engine supports merged calls, we should immediately
+                // modify this part to avoid inefficient serial loop calls.
+                for (region_id, req) in requests {
+                    let span = tracing_context.attach(info_span!(
+                        "RegionServer::handle_region_request",
+                        region_id = region_id.to_string()
+                    ));
+                    let result = self
+                        .handle_request(region_id, req)
+                        .trace(span)
+                        .await
+                        .map_err(BoxedError::new)
+                        .context(ExecuteGrpcRequestSnafu)?;
+                    results.push(result);
+                }
+                results
             }
-            results
         };
 
         // merge results by sum up affected rows and merge extensions.
@@ -725,6 +757,61 @@ impl RegionServerInner {
             .into_iter()
             .flatten()
             .collect::<Vec<_>>())
+    }
+
+    // Handle create requests in batch.
+    //
+    // limitiation: all create requests must be in the same engine.
+    pub async fn handle_batch_create_requests(
+        &self,
+        requests: Vec<(RegionId, RegionCreateRequest)>,
+    ) -> Result<RegionResponse> {
+        let region_changes = requests
+            .iter()
+            .map(|(region_id, create)| {
+                let attribute = parse_region_attribute(&create.engine, &create.options)?;
+                Ok((*region_id, RegionChange::Register(attribute)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let (first_region_id, first_region_change) = region_changes.first().unwrap();
+        let engine = match self.get_engine(*first_region_id, first_region_change)? {
+            CurrentEngine::Engine(engine) => engine,
+            CurrentEngine::EarlyReturn(rows) => return Ok(RegionResponse::new(rows)),
+        };
+
+        for (region_id, region_change) in region_changes.iter() {
+            self.set_region_status_not_ready(*region_id, &engine, region_change);
+        }
+
+        let result =
+            engine
+                .handle_batch_create_requests(requests)
+                .await
+                .context(HandleRegionRequestSnafu {
+                    region_id: *first_region_id,
+                });
+
+        match result {
+            Ok(result) => {
+                for (region_id, region_change) in region_changes {
+                    self.set_region_status_ready(region_id, engine.clone(), region_change)
+                        .await?;
+                }
+
+                Ok(RegionResponse {
+                    affected_rows: result.affected_rows,
+                    extensions: result.extensions,
+                })
+            }
+            Err(err) => {
+                for (region_id, region_change) in region_changes {
+                    self.unset_region_status(region_id, region_change);
+                }
+
+                Err(err)
+            }
+        }
     }
 
     pub async fn handle_request(
