@@ -18,7 +18,7 @@ mod validate;
 
 use std::collections::{HashMap, HashSet};
 
-use add_columns::add_columns_to_physical_data_region;
+pub(crate) use add_columns::add_columns_to_physical_data_region;
 use api::v1::SemanticType;
 use common_telemetry::{info, warn};
 use common_time::{Timestamp, FOREVER};
@@ -50,7 +50,7 @@ use crate::engine::options::{set_data_region_options, IndexOptions, PhysicalRegi
 use crate::engine::MetricEngineInner;
 use crate::error::{
     ColumnNotFoundSnafu, ColumnTypeMismatchSnafu, ConflictRegionOptionSnafu, CreateMitoRegionSnafu,
-    EmptyRequestSnafu, InternalColumnOccupiedSnafu, InvalidMetadataSnafu, MissingRegionOptionSnafu,
+    InternalColumnOccupiedSnafu, InvalidMetadataSnafu, MissingRegionOptionSnafu,
     MultipleFieldColumnSnafu, NoFieldColumnSnafu, PhysicalRegionNotFoundSnafu, Result,
     SerializeColumnMetadataSnafu,
 };
@@ -81,16 +81,8 @@ impl MetricEngineInner {
             .options
             .contains_key(LOGICAL_TABLE_METADATA_KEY)
         {
-            let physical_region_id = self.create_logical_regions(requests).await?;
-            let physical_columns = self
-                .data_region
-                .physical_columns(physical_region_id)
+            self.create_logical_regions(requests, extension_return_value)
                 .await?;
-            extension_return_value.insert(
-                ALTER_PHYSICAL_EXTENSION_KEY.to_string(),
-                ColumnMetadata::encode_list(&physical_columns)
-                    .context(SerializeColumnMetadataSnafu)?,
-            );
         } else {
             return MissingRegionOptionSnafu {}.fail();
         }
@@ -156,14 +148,11 @@ impl MetricEngineInner {
     }
 
     /// Create multiple logical regions on the same physical region.
-    ///
-    /// Returns the physical region id of the created logical regions.
     async fn create_logical_regions(
         &self,
         requests: Vec<(RegionId, RegionCreateRequest)>,
-    ) -> Result<RegionId> {
-        ensure!(!requests.is_empty(), EmptyRequestSnafu {});
-
+        extension_return_value: &mut HashMap<String, Vec<u8>>,
+    ) -> Result<()> {
         let physical_region_id = validate_create_logical_regions(&requests)?;
         let data_region_id = utils::to_data_region_id(physical_region_id);
 
@@ -219,7 +208,7 @@ impl MetricEngineInner {
             .iter()
             .map(|(region_id, _)| (*region_id))
             .collect::<Vec<_>>();
-        let logical_regions_column_names = requests.iter().map(|(region_id, request)| {
+        let logical_region_columns = requests.iter().map(|(region_id, request)| {
             (
                 *region_id,
                 request
@@ -247,16 +236,21 @@ impl MetricEngineInner {
             )
         });
 
+        extension_return_value.insert(
+            ALTER_PHYSICAL_EXTENSION_KEY.to_string(),
+            ColumnMetadata::encode_list(&physical_columns).context(SerializeColumnMetadataSnafu)?,
+        );
+
         // Writes logical regions metadata to metadata region
         self.metadata_region
-            .add_logical_regions(physical_region_id, logical_regions_column_names)
+            .add_logical_regions(physical_region_id, true, logical_region_columns)
             .await?;
 
         let mut state = self.state.write().unwrap();
         state.add_physical_columns(data_region_id, new_add_columns);
         state.add_logical_regions(physical_region_id, logical_regions);
 
-        Ok(data_region_id)
+        Ok(())
     }
 
     /// Execute corresponding alter requests to mito region. After calling this, `new_columns` will be assign a new column id

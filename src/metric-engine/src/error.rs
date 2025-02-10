@@ -218,6 +218,13 @@ pub enum Error {
         location: Location,
     },
 
+    #[snafu(display("Unsupported alter kind: {}", kind))]
+    UnsupportedAlterKind {
+        kind: String,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
     #[snafu(display("Multiple field column found: {} and {}", previous, current))]
     MultipleFieldColumn {
         previous: String,
@@ -269,7 +276,8 @@ impl ErrorExt for Error {
             | NoFieldColumn { .. }
             | AddingFieldColumn { .. }
             | ParseRegionOptions { .. }
-            | EmptyRequest { .. } => StatusCode::InvalidArguments,
+            | EmptyRequest { .. }
+            | UnsupportedAlterKind { .. } => StatusCode::InvalidArguments,
 
             ForbiddenPhysicalAlter { .. } | UnsupportedRegionRequest { .. } => {
                 StatusCode::Unsupported

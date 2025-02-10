@@ -557,16 +557,21 @@ impl MetadataRegion {
     pub async fn add_logical_regions(
         &self,
         physical_region_id: RegionId,
+        write_region_id: bool,
         logical_regions: impl Iterator<Item = (RegionId, HashMap<&str, &ColumnMetadata>)>,
     ) -> Result<()> {
         let region_id = utils::to_metadata_region_id(physical_region_id);
         let iter = logical_regions
             .into_iter()
             .flat_map(|(logical_region_id, column_metadatas)| {
-                Some((
-                    MetadataRegion::concat_region_key(logical_region_id),
-                    String::new(),
-                ))
+                if write_region_id {
+                    Some((
+                        MetadataRegion::concat_region_key(logical_region_id),
+                        String::new(),
+                    ))
+                } else {
+                    None
+                }
                 .into_iter()
                 .chain(column_metadatas.into_iter().map(
                     move |(name, column_metadata)| {
@@ -855,7 +860,7 @@ mod test {
                 .collect::<HashMap<_, _>>(),
         )];
         metadata_region
-            .add_logical_regions(physical_region_id, iter.into_iter())
+            .add_logical_regions(physical_region_id, true, iter.into_iter())
             .await
             .unwrap();
         // Add logical region again.
@@ -867,7 +872,7 @@ mod test {
                 .collect::<HashMap<_, _>>(),
         )];
         metadata_region
-            .add_logical_regions(physical_region_id, iter.into_iter())
+            .add_logical_regions(physical_region_id, true, iter.into_iter())
             .await
             .unwrap();
 
