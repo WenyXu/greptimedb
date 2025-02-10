@@ -15,6 +15,7 @@
 //! Region Engine's definition
 
 use std::any::Any;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::sync::{Arc, Mutex};
 
@@ -27,13 +28,13 @@ use common_recordbatch::SendableRecordBatchStream;
 use common_time::Timestamp;
 use datafusion_physical_plan::{DisplayAs, DisplayFormatType};
 use datatypes::schema::SchemaRef;
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
 use crate::logstore::entry;
 use crate::metadata::RegionMetadataRef;
-use crate::region_request::{RegionOpenRequest, RegionRequest};
+use crate::region_request::{BatchRegionRequest, RegionOpenRequest, RegionRequest};
 use crate::storage::{RegionId, ScanRequest};
 
 /// The settable region role state.
@@ -405,6 +406,28 @@ pub trait RegionEngine: Send + Sync {
         }
 
         Ok(join_all(tasks).await)
+    }
+
+    async fn handle_batch_request(
+        &self,
+        batch_request: BatchRegionRequest,
+    ) -> Result<RegionResponse, BoxedError> {
+        let join_tasks = batch_request
+            .into_requests_iter()
+            .map(|(region_id, req)| async move { self.handle_request(region_id, req).await });
+
+        let results = try_join_all(join_tasks).await?;
+        let mut affected_rows = 0;
+        let mut extensions = HashMap::new();
+        for result in results {
+            affected_rows += result.affected_rows;
+            extensions.extend(result.extensions);
+        }
+
+        Ok(RegionResponse {
+            affected_rows,
+            extensions,
+        })
     }
 
     /// Handles non-query request to the region. Returns the count of affected rows.
