@@ -189,7 +189,7 @@ impl RegionEngine for MetricEngine {
             RegionRequest::Close(close) => self.inner.close_region(region_id, close).await,
             RegionRequest::Alter(alter) => {
                 self.inner
-                    .alter_region(region_id, alter, &mut extension_return_value)
+                    .alter_regions(vec![(region_id, alter)], &mut extension_return_value)
                     .await
             }
             RegionRequest::Compact(_) => {

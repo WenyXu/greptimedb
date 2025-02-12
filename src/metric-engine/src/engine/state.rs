@@ -242,10 +242,6 @@ impl MetricEngineState {
         Ok(())
     }
 
-    pub fn invalid_logical_column_cache(&mut self, logical_region_id: RegionId) {
-        self.logical_columns.remove(&logical_region_id);
-    }
-
     pub fn is_logical_region_exist(&self, logical_region_id: RegionId) -> bool {
         self.logical_regions().contains_key(&logical_region_id)
     }
