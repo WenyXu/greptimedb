@@ -145,7 +145,17 @@ impl Instance {
             .context(error::OpenRaftEngineBackendSnafu)?;
 
         let kv_backend = Arc::new(kv_backend);
-        let state_store = Arc::new(KvStateStore::new(kv_backend.clone()));
+        let procedure_manager =
+            Self::build_procedure_manager(kv_backend.clone(), procedure_config).await?;
+
+        Ok((kv_backend, procedure_manager))
+    }
+
+    pub async fn build_procedure_manager(
+        kvbackend: KvBackendRef,
+        procedure_config: ProcedureConfig,
+    ) -> Result<ProcedureManagerRef> {
+        let state_store = Arc::new(KvStateStore::new(kvbackend.clone()));
 
         let manager_config = ManagerConfig {
             max_retry_times: procedure_config.max_retry_times,
@@ -154,7 +164,7 @@ impl Instance {
         };
         let procedure_manager = Arc::new(LocalManager::new(manager_config, state_store));
 
-        Ok((kv_backend, procedure_manager))
+        Ok(procedure_manager)
     }
 
     pub fn build_servers(&mut self, servers: ServerHandlers) -> Result<()> {

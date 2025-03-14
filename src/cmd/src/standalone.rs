@@ -19,7 +19,7 @@ use std::{fs, path};
 use async_trait::async_trait;
 use cache::{build_fundamental_cache_registry, with_default_composite_cache_registry};
 use catalog::information_schema::InformationExtension;
-use catalog::kvbackend::KvBackendCatalogManager;
+use catalog::kvbackend::{CachedKvBackendBuilder, KvBackendCatalogManager};
 use clap::Parser;
 use client::api::v1::meta::RegionRole;
 use common_base::readable_size::ReadableSize;
@@ -38,6 +38,7 @@ use common_meta::ddl_manager::DdlManager;
 use common_meta::key::flow::flow_state::FlowStat;
 use common_meta::key::flow::{FlowMetadataManager, FlowMetadataManagerRef};
 use common_meta::key::{TableMetadataManager, TableMetadataManagerRef};
+use common_meta::kv_backend::etcd::EtcdStore;
 use common_meta::kv_backend::KvBackendRef;
 use common_meta::node_manager::NodeManagerRef;
 use common_meta::peer::Peer;
@@ -63,6 +64,7 @@ use frontend::service_config::{
     InfluxdbOptions, JaegerOptions, MysqlOptions, OpentsdbOptions, PostgresOptions,
     PromStoreOptions,
 };
+use meta_client::MetaClientOptions;
 use meta_srv::metasrv::{FLOW_ID_SEQ, TABLE_ID_SEQ};
 use mito2::config::MitoConfig;
 use query::stats::StatementStatistics;
@@ -157,6 +159,7 @@ pub struct StandaloneOptions {
     pub init_regions_in_background: bool,
     pub init_regions_parallelism: usize,
     pub max_in_flight_write_bytes: Option<ReadableSize>,
+    pub store_addrs: Vec<String>,
 }
 
 impl Default for StandaloneOptions {
@@ -189,6 +192,7 @@ impl Default for StandaloneOptions {
             init_regions_in_background: false,
             init_regions_parallelism: 16,
             max_in_flight_write_bytes: None,
+            store_addrs: vec![],
         }
     }
 }
@@ -487,14 +491,37 @@ impl StartCommand {
         fs::create_dir_all(path::Path::new(data_home))
             .context(CreateDirSnafu { dir: data_home })?;
 
-        let metadata_dir = metadata_store_dir(data_home);
-        let (kv_backend, procedure_manager) = FeInstance::try_build_standalone_components(
-            metadata_dir,
-            opts.metadata_store,
-            opts.procedure,
-        )
-        .await
-        .context(StartFrontendSnafu)?;
+        let (kv_backend, procedure_manager) = if opts.store_addrs.is_empty() {
+            let metadata_dir = metadata_store_dir(data_home);
+            let (kv_backend, procedure_manager) = FeInstance::try_build_standalone_components(
+                metadata_dir,
+                opts.metadata_store,
+                opts.procedure,
+            )
+            .await
+            .context(StartFrontendSnafu)?;
+
+            (kv_backend as KvBackendRef, procedure_manager)
+        } else {
+            let kv_backend = EtcdStore::with_endpoints(opts.store_addrs.clone(), 128)
+                .await
+                .unwrap();
+            let meta_client_options = MetaClientOptions::default();
+            let cache_meta_backend = Arc::new(
+                CachedKvBackendBuilder::new(kv_backend.clone())
+                    .cache_max_capacity(meta_client_options.metadata_cache_max_capacity)
+                    .cache_ttl(meta_client_options.metadata_cache_ttl)
+                    .cache_tti(meta_client_options.metadata_cache_tti)
+                    .build(),
+            );
+
+            let procedure_manager =
+                FeInstance::build_procedure_manager(cache_meta_backend.clone(), opts.procedure)
+                    .await
+                    .context(StartFrontendSnafu)?;
+
+            (cache_meta_backend as KvBackendRef, procedure_manager)
+        };
 
         // Builds cache registry
         let layered_cache_builder = LayeredCacheRegistryBuilder::default();
