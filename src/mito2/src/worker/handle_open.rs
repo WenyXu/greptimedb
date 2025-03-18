@@ -17,7 +17,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use common_telemetry::info;
+use common_telemetry::{debug, info};
 use object_store::util::join_path;
 use snafu::{OptionExt, ResultExt};
 use store_api::logstore::LogStore;
@@ -186,6 +186,13 @@ async fn prefetch_latest_ssts(region: MitoRegionRef, write_cache: WriteCacheRef)
         let index_key = IndexKey::new(region_id, file_meta.file_id, FileType::Parquet);
         let remote_path = location::sst_file_path(layer.region_dir(), file_meta.file_id);
         let file_size = file_meta.file_size;
+        if write_cache.is_exist(index_key).await {
+            debug!(
+                "SST {} already exists in write cache, skip download",
+                file_meta.file_id
+            );
+            continue;
+        }
         if let Err(err) = write_cache
             .download(index_key, &remote_path, layer.object_store(), file_size)
             .await

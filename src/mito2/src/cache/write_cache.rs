@@ -193,6 +193,11 @@ impl WriteCache {
         self.file_cache.remove(index_key).await
     }
 
+    /// Returns true if the file exists in the cache.
+    pub(crate) async fn is_exist(&self, index_key: IndexKey) -> bool {
+        self.file_cache.get(index_key).await.is_some()
+    }
+
     /// Downloads a file in `remote_path` from the remote object store to the local cache
     /// (specified by `index_key`).
     pub(crate) async fn download(
