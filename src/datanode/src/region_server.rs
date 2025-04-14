@@ -841,7 +841,10 @@ impl RegionServerInner {
                 .map(|(region_id, _)| (*region_id, RegionChange::None))
                 .collect::<Vec<_>>(),
         };
-        let is_alter = matches!(batch_request, BatchRegionDdlRequest::Alter(_));
+        let is_create_or_alter = matches!(
+            batch_request,
+            BatchRegionDdlRequest::Create(_) | BatchRegionDdlRequest::Alter(_)
+        );
 
         // The ddl procedure will ensure all requests are in the same engine.
         // Therefore, we can get the engine from the first request.
@@ -868,7 +871,7 @@ impl RegionServerInner {
                         .await?;
                 }
 
-                if is_alter {
+                if is_create_or_alter {
                     let region_ids = region_changes
                         .iter()
                         .map(|(region_id, _)| *region_id)
