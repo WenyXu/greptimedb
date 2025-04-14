@@ -52,8 +52,7 @@ use servers::grpc::region_server::RegionServerHandler;
 use session::context::{QueryContextBuilder, QueryContextRef};
 use snafu::{ensure, OptionExt, ResultExt};
 use store_api::metric_engine_consts::{
-    DATA_MANIFEST_VERSION_EXTENSION_KEY, FILE_ENGINE_NAME, LOGICAL_TABLE_METADATA_KEY,
-    METADATA_MANIFEST_VERSION_EXTENSION_KEY, METRIC_ENGINE_NAME,
+    FILE_ENGINE_NAME, LOGICAL_TABLE_METADATA_KEY, MANIFEST_INFO_EXTENSION_KEY, METRIC_ENGINE_NAME,
 };
 use store_api::region_engine::{
     RegionEngine, RegionEngineRef, RegionManifestInfo, RegionRole, RegionStatistic,
@@ -841,6 +840,7 @@ impl RegionServerInner {
                 .map(|(region_id, _)| (*region_id, RegionChange::None))
                 .collect::<Vec<_>>(),
         };
+        let is_alter = matches!(batch_request, BatchRegionDdlRequest::Alter(_));
 
         // The ddl procedure will ensure all requests are in the same engine.
         // Therefore, we can get the engine from the first request.
@@ -861,10 +861,18 @@ impl RegionServerInner {
             .context(HandleBatchDdlRequestSnafu { ddl_type });
 
         match result {
-            Ok(result) => {
-                for (region_id, region_change) in region_changes {
-                    self.set_region_status_ready(region_id, engine.clone(), region_change)
+            Ok(mut result) => {
+                for (region_id, region_change) in &region_changes {
+                    self.set_region_status_ready(*region_id, engine.clone(), *region_change)
                         .await?;
+                }
+
+                if is_alter {
+                    let region_ids = region_changes
+                        .iter()
+                        .map(|(region_id, _)| *region_id)
+                        .collect::<Vec<_>>();
+                    Self::add_manifest_info_to_response(&region_ids, engine, &mut result);
                 }
 
                 Ok(RegionResponse {
@@ -930,7 +938,7 @@ impl RegionServerInner {
                 self.set_region_status_ready(region_id, engine.clone(), region_change)
                     .await?;
                 if is_alter {
-                    Self::add_manifest_version_to_response(region_id, engine, &mut result);
+                    Self::add_manifest_info_to_response(&[region_id], engine, &mut result);
                 }
 
                 Ok(RegionResponse {
@@ -946,28 +954,26 @@ impl RegionServerInner {
         }
     }
 
-    fn add_manifest_version_to_response(
-        region_id: RegionId,
+    fn add_manifest_info_to_response(
+        region_ids: &[RegionId],
         engine: Arc<dyn RegionEngine>,
         result: &mut RegionResponse,
     ) {
-        if let Some(region_stat) = engine.region_statistic(region_id) {
-            let metadata_manifest_version = region_stat.manifest.metadata_manifest_version();
-            let data_manifest_version = region_stat.manifest.data_manifest_version();
-
-            if let Some(metadata_manifest_version) = metadata_manifest_version {
-                result.extensions.insert(
-                    METADATA_MANIFEST_VERSION_EXTENSION_KEY.to_string(),
-                    metadata_manifest_version.to_string().into_bytes(),
-                );
+        let mut region_manifest_info = Vec::with_capacity(region_ids.len());
+        for region_id in region_ids {
+            if let Some(region_stat) = engine.region_statistic(*region_id) {
+                region_manifest_info.push((region_id, region_stat.manifest));
             }
-            result.extensions.insert(
-                DATA_MANIFEST_VERSION_EXTENSION_KEY.to_string(),
-                data_manifest_version.to_string().into_bytes(),
-            );
+        }
+
+        result.extensions.insert(
+            MANIFEST_INFO_EXTENSION_KEY.to_string(),
+            serde_json::to_vec(&region_manifest_info).unwrap(),
+        );
+        for (region_id, manifest_info) in region_manifest_info {
             info!(
-                "Region {} is altered, data_manifest_version: {}, metadata_manifest_version: {:?}",
-                region_id, data_manifest_version, metadata_manifest_version
+                "Region {} is altered, manifest info: {:?}",
+                region_id, manifest_info,
             );
         }
     }

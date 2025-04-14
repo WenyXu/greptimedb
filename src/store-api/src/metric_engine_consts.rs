@@ -74,12 +74,8 @@ pub const LOGICAL_TABLE_METADATA_KEY: &str = "on_physical_table";
 pub const ALTER_PHYSICAL_EXTENSION_KEY: &str = "ALTER_PHYSICAL";
 
 /// HashMap key to be used in the region server's extension response.
-/// Represent the manifest version of the data region.
-pub const DATA_MANIFEST_VERSION_EXTENSION_KEY: &str = "DATA_MANIFEST_VERSION";
-
-/// HashMap key to be used in the region server's extension response.
-/// Represent the manifest version of the metadata region.
-pub const METADATA_MANIFEST_VERSION_EXTENSION_KEY: &str = "METADATA_MANIFEST_VERSION";
+/// Represent the manifest info of a region.
+pub const MANIFEST_INFO_EXTENSION_KEY: &str = "MANIFEST_INFO";
 
 /// Returns true if it's a internal column of the metric engine.
 pub fn is_metric_engine_internal_column(name: &str) -> bool {
