@@ -60,6 +60,7 @@ use store_api::region_engine::{
 };
 use store_api::region_request::{
     AffectedRows, BatchRegionDdlRequest, RegionCloseRequest, RegionOpenRequest, RegionRequest,
+    RegionSyncRequest,
 };
 use store_api::storage::RegionId;
 use tokio::sync::{Semaphore, SemaphorePermit};
@@ -925,6 +926,11 @@ impl RegionServerInner {
             CurrentEngine::EarlyReturn(rows) => return Ok(RegionResponse::new(rows)),
         };
 
+        if let RegionRequest::Sync(sync_request) = request {
+            self.handle_sync_request(engine, sync_request).await?;
+            return Ok(RegionResponse::new(AffectedRows::default()));
+        }
+
         // Sets corresponding region status to registering/deregistering before the operation.
         self.set_region_status_not_ready(region_id, &engine, &region_change);
 
@@ -952,6 +958,19 @@ impl RegionServerInner {
                 Err(err)
             }
         }
+    }
+
+    pub async fn handle_sync_request(
+        &self,
+        engine: Arc<dyn RegionEngine>,
+        sync_request: RegionSyncRequest,
+    ) -> Result<()> {
+        let region_id = sync_request.region_id;
+        let manifest_info = sync_request.region_manifest_info;
+        engine
+            .sync_region(region_id, manifest_info)
+            .await
+            .context(HandleRegionRequestSnafu { region_id })
     }
 
     fn add_manifest_info_to_response(
