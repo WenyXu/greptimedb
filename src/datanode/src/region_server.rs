@@ -60,7 +60,6 @@ use store_api::region_engine::{
 };
 use store_api::region_request::{
     AffectedRows, BatchRegionDdlRequest, RegionCloseRequest, RegionOpenRequest, RegionRequest,
-    RegionSyncRequest,
 };
 use store_api::storage::RegionId;
 use tokio::sync::{Semaphore, SemaphorePermit};
@@ -321,24 +320,9 @@ impl RegionServer {
             .get(&region_id)
             .with_context(|| RegionNotFoundSnafu { region_id })?;
 
-        let Some(new_opened_regions) = engine_with_status
-            .sync_region(region_id, manifest_info)
+        self.inner
+            .sync_region_manifest(engine_with_status.engine(), region_id, manifest_info)
             .await
-            .with_context(|_| HandleRegionRequestSnafu { region_id })?
-            .new_opened_logical_region_ids()
-        else {
-            return Ok(());
-        };
-
-        for region in new_opened_regions {
-            self.inner.region_map.insert(
-                region,
-                RegionEngineWithStatus::Ready(engine_with_status.engine().clone()),
-            );
-            info!("Logical region {} is registered!", region);
-        }
-
-        Ok(())
     }
 
     /// Set region role state gracefully.
@@ -841,10 +825,8 @@ impl RegionServerInner {
                 .map(|(region_id, _)| (*region_id, RegionChange::None))
                 .collect::<Vec<_>>(),
         };
-        let is_create_or_alter = matches!(
-            batch_request,
-            BatchRegionDdlRequest::Create(_) | BatchRegionDdlRequest::Alter(_)
-        );
+        let is_create_or_alter = matches!(batch_request, BatchRegionDdlRequest::Create(_))
+            || matches!(batch_request, BatchRegionDdlRequest::Alter(_));
 
         // The ddl procedure will ensure all requests are in the same engine.
         // Therefore, we can get the engine from the first request.
@@ -930,7 +912,12 @@ impl RegionServerInner {
         };
 
         if let RegionRequest::Sync(sync_request) = request {
-            self.handle_sync_request(engine, sync_request).await?;
+            self.sync_region_manifest(
+                &engine,
+                sync_request.region_id,
+                sync_request.region_manifest_info,
+            )
+            .await?;
             return Ok(RegionResponse::new(AffectedRows::default()));
         }
 
@@ -963,17 +950,28 @@ impl RegionServerInner {
         }
     }
 
-    pub async fn handle_sync_request(
+    pub async fn sync_region_manifest(
         &self,
-        engine: Arc<dyn RegionEngine>,
-        sync_request: RegionSyncRequest,
+        engine: &RegionEngineRef,
+        region_id: RegionId,
+        manifest_info: RegionManifestInfo,
     ) -> Result<()> {
-        let region_id = sync_request.region_id;
-        let manifest_info = sync_request.region_manifest_info;
-        engine
+        let Some(new_opened_regions) = engine
             .sync_region(region_id, manifest_info)
             .await
-            .context(HandleRegionRequestSnafu { region_id })
+            .with_context(|_| HandleRegionRequestSnafu { region_id })?
+            .new_opened_logical_region_ids()
+        else {
+            return Ok(());
+        };
+
+        for region in new_opened_regions {
+            self.region_map
+                .insert(region, RegionEngineWithStatus::Ready(engine.clone()));
+            info!("Logical region {} is registered!", region);
+        }
+
+        Ok(())
     }
 
     fn add_manifest_info_to_response(
