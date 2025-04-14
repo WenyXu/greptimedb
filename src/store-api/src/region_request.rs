@@ -20,10 +20,11 @@ use api::v1::add_column_location::LocationType;
 use api::v1::column_def::{
     as_fulltext_option_analyzer, as_fulltext_option_backend, as_skipping_index_type,
 };
+use api::v1::region::sync_request::ManifestInfo;
 use api::v1::region::{
     alter_request, compact_request, region_request, AlterRequest, AlterRequests, CloseRequest,
     CompactRequest, CreateRequest, CreateRequests, DeleteRequests, DropRequest, DropRequests,
-    FlushRequest, InsertRequests, OpenRequest, TruncateRequest,
+    FlushRequest, InsertRequests, OpenRequest, SyncRequest, TruncateRequest,
 };
 use api::v1::{
     self, set_index, Analyzer, FulltextBackend as PbFulltextBackend, Option as PbOption, Rows,
@@ -50,6 +51,7 @@ use crate::mito_engine_options::{
     TWCS_TIME_WINDOW,
 };
 use crate::path_utils::region_dir;
+use crate::region_engine::RegionManifestInfo;
 use crate::storage::{ColumnId, RegionId, ScanRequest};
 
 #[derive(Debug, IntoStaticStr)]
@@ -126,6 +128,7 @@ pub enum RegionRequest {
     Compact(RegionCompactRequest),
     Truncate(RegionTruncateRequest),
     Catchup(RegionCatchupRequest),
+    Sync(RegionSyncRequest),
 }
 
 impl RegionRequest {
@@ -146,6 +149,8 @@ impl RegionRequest {
             region_request::Body::Creates(creates) => make_region_creates(creates),
             region_request::Body::Drops(drops) => make_region_drops(drops),
             region_request::Body::Alters(alters) => make_region_alters(alters),
+            region_request::Body::Sync(sync) => make_region_sync(sync),
+            region_request::Body::BulkInserts(_) => todo!(),
         }
     }
 
@@ -284,6 +289,30 @@ fn make_region_alters(alters: AlterRequests) -> Result<Vec<(RegionId, RegionRequ
         requests.extend(make_region_alter(alter)?);
     }
     Ok(requests)
+}
+
+fn make_region_sync(sync: SyncRequest) -> Result<Vec<(RegionId, RegionRequest)>> {
+    let region_id = sync.region_id.into();
+    let region_manifest_info = match sync.manifest_info {
+        Some(ManifestInfo::MitoManifestInfo(manifest_info)) => RegionManifestInfo::Mito {
+            manifest_version: manifest_info.data_manifest_version,
+            flushed_entry_id: 0,
+        },
+        Some(ManifestInfo::MetricManifestInfo(manifest_info)) => RegionManifestInfo::Metric {
+            data_manifest_version: manifest_info.data_manifest_version,
+            data_flushed_entry_id: 0,
+            metadata_manifest_version: manifest_info.metadata_manifest_version,
+            metadata_flushed_entry_id: 0,
+        },
+        None => todo!(),
+    };
+    Ok(vec![(
+        region_id,
+        RegionRequest::Sync(RegionSyncRequest {
+            region_id,
+            region_manifest_info,
+        }),
+    )])
 }
 
 fn make_region_flush(flush: FlushRequest) -> Result<Vec<(RegionId, RegionRequest)>> {
@@ -1119,6 +1148,12 @@ pub struct RegionSequencesRequest {
     pub region_ids: Vec<RegionId>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RegionSyncRequest {
+    pub region_id: RegionId,
+    pub region_manifest_info: RegionManifestInfo,
+}
+
 impl fmt::Display for RegionRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1133,6 +1168,7 @@ impl fmt::Display for RegionRequest {
             RegionRequest::Compact(_) => write!(f, "Compact"),
             RegionRequest::Truncate(_) => write!(f, "Truncate"),
             RegionRequest::Catchup(_) => write!(f, "Catchup"),
+            RegionRequest::Sync(_) => write!(f, "Sync"),
         }
     }
 }
