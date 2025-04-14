@@ -827,6 +827,11 @@ impl RegionServerInner {
         };
         let is_create_or_alter = matches!(batch_request, BatchRegionDdlRequest::Create(_))
             || matches!(batch_request, BatchRegionDdlRequest::Alter(_));
+        info!(
+            "handle_batch_request: request_type: {}, is_create: {}",
+            batch_request.request_type(),
+            is_create_or_alter,
+        );
 
         // The ddl procedure will ensure all requests are in the same engine.
         // Therefore, we can get the engine from the first request.
@@ -962,6 +967,7 @@ impl RegionServerInner {
             .with_context(|_| HandleRegionRequestSnafu { region_id })?
             .new_opened_logical_region_ids()
         else {
+            warn!("No new opened logical regions");
             return Ok(());
         };
 
