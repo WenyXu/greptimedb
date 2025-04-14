@@ -52,7 +52,8 @@ use servers::grpc::region_server::RegionServerHandler;
 use session::context::{QueryContextBuilder, QueryContextRef};
 use snafu::{ensure, OptionExt, ResultExt};
 use store_api::metric_engine_consts::{
-    FILE_ENGINE_NAME, LOGICAL_TABLE_METADATA_KEY, METRIC_ENGINE_NAME,
+    DATA_MANIFEST_VERSION_EXTENSION_KEY, FILE_ENGINE_NAME, LOGICAL_TABLE_METADATA_KEY,
+    METADATA_MANIFEST_VERSION_EXTENSION_KEY, METRIC_ENGINE_NAME,
 };
 use store_api::region_engine::{
     RegionEngineRef, RegionManifestInfo, RegionRole, RegionStatistic, SetRegionRoleStateResponse,
@@ -888,7 +889,7 @@ impl RegionServerInner {
         let _timer = crate::metrics::HANDLE_REGION_REQUEST_ELAPSED
             .with_label_values(&[request_type])
             .start_timer();
-
+        let is_alter = matches!(request, RegionRequest::Alter(_));
         let region_change = match &request {
             RegionRequest::Create(create) => {
                 let attribute = parse_region_attribute(&create.engine, &create.options)?;
@@ -921,10 +922,37 @@ impl RegionServerInner {
             .await
             .with_context(|_| HandleRegionRequestSnafu { region_id })
         {
-            Ok(result) => {
+            Ok(mut result) => {
                 // Sets corresponding region status to ready.
-                self.set_region_status_ready(region_id, engine, region_change)
+                self.set_region_status_ready(region_id, engine.clone(), region_change)
                     .await?;
+                if is_alter {
+                    if let Some(region_stat) = engine.region_statistic(region_id) {
+                        let metadata_manifest_version =
+                            region_stat.manifest.metadata_manifest_version();
+                        let data_manifest_version = region_stat.manifest.data_manifest_version();
+
+                        if let Some(metadata_manifest_version) = metadata_manifest_version {
+                            result.extensions.insert(
+                                METADATA_MANIFEST_VERSION_EXTENSION_KEY.to_string(),
+                                metadata_manifest_version.to_string().into_bytes(),
+                            );
+                        }
+
+                        result.extensions.insert(
+                            DATA_MANIFEST_VERSION_EXTENSION_KEY.to_string(),
+                            data_manifest_version.to_string().into_bytes(),
+                        );
+
+                        info!(
+                            "Region {} is altered, data_manifest_version: {}, metadata_manifest_version: {:?}",
+                            region_id,
+                            data_manifest_version,
+                            metadata_manifest_version
+                        );
+                    }
+                }
+
                 Ok(RegionResponse {
                     affected_rows: result.affected_rows,
                     extensions: result.extensions,

@@ -34,7 +34,7 @@ use store_api::metric_engine_consts::{
     METADATA_SCHEMA_VALUE_COLUMN_NAME,
 };
 use store_api::region_engine::RegionEngine;
-use store_api::region_request::{RegionDeleteRequest, RegionPutRequest};
+use store_api::region_request::{RegionDeleteRequest, RegionFlushRequest, RegionPutRequest};
 use store_api::storage::{RegionId, ScanRequest};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
@@ -518,6 +518,16 @@ impl MetadataRegion {
             .handle_request(
                 region_id,
                 store_api::region_request::RegionRequest::Put(put_request),
+            )
+            .await
+            .context(MitoWriteOperationSnafu)?;
+
+        self.mito
+            .handle_request(
+                region_id,
+                store_api::region_request::RegionRequest::Flush(RegionFlushRequest {
+                    row_group_size: None,
+                }),
             )
             .await
             .context(MitoWriteOperationSnafu)?;
