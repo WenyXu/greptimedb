@@ -957,6 +957,13 @@ pub enum MetadataError {
         #[snafu(implicit)]
         location: Location,
     },
+
+    #[snafu(display("Unexpected: {}", reason))]
+    Unexpected {
+        reason: String,
+        #[snafu(implicit)]
+        location: Location,
+    },
 }
 
 impl ErrorExt for MetadataError {
