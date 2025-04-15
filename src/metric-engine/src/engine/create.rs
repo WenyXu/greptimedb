@@ -28,15 +28,15 @@ use snafu::{ensure, OptionExt, ResultExt};
 use store_api::metadata::ColumnMetadata;
 use store_api::metric_engine_consts::{
     ALTER_PHYSICAL_EXTENSION_KEY, DATA_REGION_SUBDIR, DATA_SCHEMA_TABLE_ID_COLUMN_NAME,
-    DATA_SCHEMA_TSID_COLUMN_NAME, LOGICAL_TABLE_METADATA_KEY, METADATA_REGION_SUBDIR,
-    METADATA_SCHEMA_KEY_COLUMN_INDEX, METADATA_SCHEMA_KEY_COLUMN_NAME,
+    DATA_SCHEMA_TSID_COLUMN_NAME, LOGICAL_TABLE_METADATA_KEY, MANIFEST_INFO_EXTENSION_KEY,
+    METADATA_REGION_SUBDIR, METADATA_SCHEMA_KEY_COLUMN_INDEX, METADATA_SCHEMA_KEY_COLUMN_NAME,
     METADATA_SCHEMA_TIMESTAMP_COLUMN_INDEX, METADATA_SCHEMA_TIMESTAMP_COLUMN_NAME,
     METADATA_SCHEMA_VALUE_COLUMN_INDEX, METADATA_SCHEMA_VALUE_COLUMN_NAME,
 };
 use store_api::mito_engine_options::{
     APPEND_MODE_KEY, MEMTABLE_PARTITION_TREE_PRIMARY_KEY_ENCODING, SKIP_WAL_KEY, TTL_KEY,
 };
-use store_api::region_engine::RegionEngine;
+use store_api::region_engine::{RegionEngine, RegionManifestInfo};
 use store_api::region_request::{AffectedRows, RegionCreateRequest, RegionRequest};
 use store_api::storage::consts::ReservedColumnId;
 use store_api::storage::RegionId;
@@ -51,7 +51,7 @@ use crate::error::{
     Result, SerializeColumnMetadataSnafu, UnexpectedRequestSnafu,
 };
 use crate::metrics::PHYSICAL_REGION_COUNT;
-use crate::utils::{self, to_data_region_id, to_metadata_region_id};
+use crate::utils::{self, get_region_statistic, to_data_region_id, to_metadata_region_id};
 
 const DEFAULT_TABLE_ID_SKIPPING_INDEX_GRANULARITY: u32 = 1024;
 
@@ -88,11 +88,18 @@ impl MetricEngineInner {
             if requests.len() == 1 {
                 let request = &requests.first().unwrap().1;
                 let physical_region_id = parse_physical_region_id(request)?;
+                let mut manifest_infos = Vec::with_capacity(1);
                 self.create_logical_regions(physical_region_id, requests, extension_return_value)
                     .await?;
+                self.add_manifest_info(physical_region_id, &mut manifest_infos);
+                extension_return_value.insert(
+                    MANIFEST_INFO_EXTENSION_KEY.to_string(),
+                    RegionManifestInfo::encode_list(&manifest_infos).unwrap(),
+                );
             } else {
                 let grouped_requests =
                     group_create_logical_region_requests_by_physical_region_id(requests)?;
+                let mut manifest_infos = Vec::with_capacity(grouped_requests.len());
                 for (physical_region_id, requests) in grouped_requests {
                     self.create_logical_regions(
                         physical_region_id,
@@ -100,13 +107,28 @@ impl MetricEngineInner {
                         extension_return_value,
                     )
                     .await?;
+                    self.add_manifest_info(physical_region_id, &mut manifest_infos);
                 }
+                extension_return_value.insert(
+                    MANIFEST_INFO_EXTENSION_KEY.to_string(),
+                    RegionManifestInfo::encode_list(&manifest_infos).unwrap(),
+                );
             }
         } else {
             return MissingRegionOptionSnafu {}.fail();
         }
 
         Ok(0)
+    }
+
+    pub(crate) fn add_manifest_info(
+        &self,
+        region_id: RegionId,
+        manifest_infos: &mut Vec<(RegionId, RegionManifestInfo)>,
+    ) {
+        if let Some(statistic) = get_region_statistic(&self.mito, region_id) {
+            manifest_infos.push((region_id, statistic.manifest));
+        }
     }
 
     /// Initialize a physical metric region at given region id.

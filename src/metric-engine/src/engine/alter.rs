@@ -20,7 +20,8 @@ use std::collections::{HashMap, HashSet};
 use extract_new_columns::extract_new_columns;
 use snafu::{ensure, OptionExt, ResultExt};
 use store_api::metadata::ColumnMetadata;
-use store_api::metric_engine_consts::ALTER_PHYSICAL_EXTENSION_KEY;
+use store_api::metric_engine_consts::{ALTER_PHYSICAL_EXTENSION_KEY, MANIFEST_INFO_EXTENSION_KEY};
+use store_api::region_engine::RegionManifestInfo;
 use store_api::region_request::{AffectedRows, AlterKind, RegionAlterRequest};
 use store_api::storage::RegionId;
 use validate::validate_alter_region_requests;
@@ -63,11 +64,18 @@ impl MetricEngineInner {
                     .unwrap()
                     .get_physical_region_id(region_id)
                     .with_context(|| LogicalRegionNotFoundSnafu { region_id })?;
+                let mut manifest_infos = Vec::with_capacity(1);
                 self.alter_logical_regions(physical_region_id, requests, extension_return_value)
                     .await?;
+                self.add_manifest_info(region_id, &mut manifest_infos);
+                extension_return_value.insert(
+                    MANIFEST_INFO_EXTENSION_KEY.to_string(),
+                    RegionManifestInfo::encode_list(&manifest_infos).unwrap(),
+                );
             } else {
                 let grouped_requests =
                     self.group_logical_region_requests_by_physical_region_id(requests)?;
+                let mut manifest_infos = Vec::with_capacity(grouped_requests.len());
                 for (physical_region_id, requests) in grouped_requests {
                     self.alter_logical_regions(
                         physical_region_id,
@@ -75,7 +83,13 @@ impl MetricEngineInner {
                         extension_return_value,
                     )
                     .await?;
+                    self.add_manifest_info(physical_region_id, &mut manifest_infos);
                 }
+
+                extension_return_value.insert(
+                    MANIFEST_INFO_EXTENSION_KEY.to_string(),
+                    RegionManifestInfo::encode_list(&manifest_infos).unwrap(),
+                );
             }
         }
         Ok(0)

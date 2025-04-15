@@ -825,13 +825,6 @@ impl RegionServerInner {
                 .map(|(region_id, _)| (*region_id, RegionChange::None))
                 .collect::<Vec<_>>(),
         };
-        let is_create_or_alter = matches!(batch_request, BatchRegionDdlRequest::Create(_))
-            || matches!(batch_request, BatchRegionDdlRequest::Alter(_));
-        info!(
-            "handle_batch_request: request_type: {}, is_create: {}",
-            batch_request.request_type(),
-            is_create_or_alter,
-        );
 
         // The ddl procedure will ensure all requests are in the same engine.
         // Therefore, we can get the engine from the first request.
@@ -852,18 +845,10 @@ impl RegionServerInner {
             .context(HandleBatchDdlRequestSnafu { ddl_type });
 
         match result {
-            Ok(mut result) => {
+            Ok(result) => {
                 for (region_id, region_change) in &region_changes {
                     self.set_region_status_ready(*region_id, engine.clone(), *region_change)
                         .await?;
-                }
-
-                if is_create_or_alter {
-                    let region_ids = region_changes
-                        .iter()
-                        .map(|(region_id, _)| *region_id)
-                        .collect::<Vec<_>>();
-                    Self::add_manifest_info_to_response(&region_ids, engine, &mut result);
                 }
 
                 Ok(RegionResponse {
@@ -988,13 +973,13 @@ impl RegionServerInner {
         let mut region_manifest_info = Vec::with_capacity(region_ids.len());
         for region_id in region_ids {
             if let Some(region_stat) = engine.region_statistic(*region_id) {
-                region_manifest_info.push((region_id, region_stat.manifest));
+                region_manifest_info.push((*region_id, region_stat.manifest));
             }
         }
 
         result.extensions.insert(
             MANIFEST_INFO_EXTENSION_KEY.to_string(),
-            serde_json::to_vec(&region_manifest_info).unwrap(),
+            RegionManifestInfo::encode_list(&region_manifest_info).unwrap(),
         );
         for (region_id, manifest_info) in region_manifest_info {
             info!(
