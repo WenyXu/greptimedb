@@ -1334,6 +1334,16 @@ pub enum ListValueRef<'a> {
     Ref { val: &'a ListValue },
 }
 
+impl<'a, 'b> ListValueRef<'a> {
+    /// Convert a [ListValue] to a [ListValueRef].
+    pub fn from_list_value(val: &'b ListValue) -> Self
+    where
+        'b: 'a,
+    {
+        ListValueRef::Ref { val }
+    }
+}
+
 impl ListValueRef<'_> {
     /// Convert self to [Value]. This method would clone the underlying data.
     pub fn to_value(self) -> Value {
