@@ -1336,7 +1336,7 @@ pub enum ListValueRef<'a> {
 
 impl ListValueRef<'_> {
     /// Convert self to [Value]. This method would clone the underlying data.
-    fn to_value(self) -> Value {
+    pub fn to_value(self) -> Value {
         match self {
             ListValueRef::Indexed { vector, idx } => vector.get(idx),
             ListValueRef::Ref { val } => Value::List(val.clone()),
@@ -1344,7 +1344,7 @@ impl ListValueRef<'_> {
     }
 
     /// Returns the inner element's data type.
-    fn datatype(&self) -> ConcreteDataType {
+    pub fn datatype(&self) -> ConcreteDataType {
         match self {
             ListValueRef::Indexed { vector, .. } => vector.data_type(),
             ListValueRef::Ref { val } => val.datatype().clone(),
