@@ -159,6 +159,12 @@ impl<S: Zeroize> ExposeSecret<S> for SecretBox<S> {
     }
 }
 
+impl<S: Zeroize + PartialEq> PartialEq for SecretBox<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.expose_secret() == other.expose_secret()
+    }
+}
+
 impl<S: Zeroize> ExposeSecretMut<S> for SecretBox<S> {
     fn expose_secret_mut(&mut self) -> &mut S {
         self.inner_secret.as_mut()

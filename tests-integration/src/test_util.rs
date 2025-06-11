@@ -31,8 +31,8 @@ use common_test_util::ports;
 use common_test_util::temp_dir::{create_temp_dir, TempDir};
 use common_wal::config::DatanodeWalConfig;
 use datanode::config::{
-    AzblobConfig, DatanodeOptions, FileConfig, GcsConfig, ObjectStoreConfig, OssConfig, S3Config,
-    StorageConfig,
+    AzblobConfig, AzblobConnection, DatanodeOptions, FileConfig, GcsConfig, GcsConnection,
+    ObjectStoreConfig, OssConfig, OssConnection, S3Config, S3Connection, StorageConfig,
 };
 use frontend::instance::Instance;
 use frontend::service_config::{MysqlOptions, PostgresOptions};
@@ -140,11 +140,14 @@ impl StorageType {
 
 fn s3_test_config() -> S3Config {
     S3Config {
-        root: uuid::Uuid::new_v4().to_string(),
-        access_key_id: env::var("GT_S3_ACCESS_KEY_ID").unwrap().into(),
-        secret_access_key: env::var("GT_S3_ACCESS_KEY").unwrap().into(),
-        bucket: env::var("GT_S3_BUCKET").unwrap(),
-        region: Some(env::var("GT_S3_REGION").unwrap()),
+        connection: S3Connection {
+            root: uuid::Uuid::new_v4().to_string(),
+            access_key_id: env::var("GT_S3_ACCESS_KEY_ID").unwrap().into(),
+            secret_access_key: env::var("GT_S3_ACCESS_KEY").unwrap().into(),
+            bucket: env::var("GT_S3_BUCKET").unwrap(),
+            region: Some(env::var("GT_S3_REGION").unwrap()),
+            ..Default::default()
+        },
         ..Default::default()
     }
 }
@@ -155,22 +158,25 @@ pub fn get_test_store_config(store_type: &StorageType) -> (ObjectStoreConfig, Te
     match store_type {
         StorageType::Gcs => {
             let gcs_config = GcsConfig {
-                root: uuid::Uuid::new_v4().to_string(),
-                bucket: env::var("GT_GCS_BUCKET").unwrap(),
-                scope: env::var("GT_GCS_SCOPE").unwrap(),
-                credential_path: env::var("GT_GCS_CREDENTIAL_PATH").unwrap().into(),
-                credential: env::var("GT_GCS_CREDENTIAL").unwrap().into(),
-                endpoint: env::var("GT_GCS_ENDPOINT").unwrap(),
+                connection: GcsConnection {
+                    root: uuid::Uuid::new_v4().to_string(),
+                    bucket: env::var("GT_GCS_BUCKET").unwrap(),
+                    scope: env::var("GT_GCS_SCOPE").unwrap(),
+                    credential_path: env::var("GT_GCS_CREDENTIAL_PATH").unwrap().into(),
+                    credential: env::var("GT_GCS_CREDENTIAL").unwrap().into(),
+                    endpoint: env::var("GT_GCS_ENDPOINT").unwrap(),
+                    ..Default::default()
+                },
                 ..Default::default()
             };
 
             let builder = Gcs::default()
-                .root(&gcs_config.root)
-                .bucket(&gcs_config.bucket)
-                .scope(&gcs_config.scope)
-                .credential_path(gcs_config.credential_path.expose_secret())
-                .credential(gcs_config.credential.expose_secret())
-                .endpoint(&gcs_config.endpoint);
+                .root(&gcs_config.connection.root)
+                .bucket(&gcs_config.connection.bucket)
+                .scope(&gcs_config.connection.scope)
+                .credential_path(gcs_config.connection.credential_path.expose_secret())
+                .credential(gcs_config.connection.credential.expose_secret())
+                .endpoint(&gcs_config.connection.endpoint);
 
             let config = ObjectStoreConfig::Gcs(gcs_config);
             let store = ObjectStore::new(builder).unwrap().finish();
@@ -178,20 +184,23 @@ pub fn get_test_store_config(store_type: &StorageType) -> (ObjectStoreConfig, Te
         }
         StorageType::Azblob => {
             let azblob_config = AzblobConfig {
-                root: uuid::Uuid::new_v4().to_string(),
-                container: env::var("GT_AZBLOB_CONTAINER").unwrap(),
-                account_name: env::var("GT_AZBLOB_ACCOUNT_NAME").unwrap().into(),
-                account_key: env::var("GT_AZBLOB_ACCOUNT_KEY").unwrap().into(),
-                endpoint: env::var("GT_AZBLOB_ENDPOINT").unwrap(),
+                connection: AzblobConnection {
+                    root: uuid::Uuid::new_v4().to_string(),
+                    container: env::var("GT_AZBLOB_CONTAINER").unwrap(),
+                    account_name: env::var("GT_AZBLOB_ACCOUNT_NAME").unwrap().into(),
+                    account_key: env::var("GT_AZBLOB_ACCOUNT_KEY").unwrap().into(),
+                    endpoint: env::var("GT_AZBLOB_ENDPOINT").unwrap(),
+                    ..Default::default()
+                },
                 ..Default::default()
             };
 
             let mut builder = Azblob::default()
-                .root(&azblob_config.root)
-                .endpoint(&azblob_config.endpoint)
-                .account_name(azblob_config.account_name.expose_secret())
-                .account_key(azblob_config.account_key.expose_secret())
-                .container(&azblob_config.container);
+                .root(&azblob_config.connection.root)
+                .endpoint(&azblob_config.connection.endpoint)
+                .account_name(azblob_config.connection.account_name.expose_secret())
+                .account_key(azblob_config.connection.account_key.expose_secret())
+                .container(&azblob_config.connection.container);
 
             if let Ok(sas_token) = env::var("GT_AZBLOB_SAS_TOKEN") {
                 builder = builder.sas_token(&sas_token);
@@ -205,20 +214,23 @@ pub fn get_test_store_config(store_type: &StorageType) -> (ObjectStoreConfig, Te
         }
         StorageType::Oss => {
             let oss_config = OssConfig {
-                root: uuid::Uuid::new_v4().to_string(),
-                access_key_id: env::var("GT_OSS_ACCESS_KEY_ID").unwrap().into(),
-                access_key_secret: env::var("GT_OSS_ACCESS_KEY").unwrap().into(),
-                bucket: env::var("GT_OSS_BUCKET").unwrap(),
-                endpoint: env::var("GT_OSS_ENDPOINT").unwrap(),
+                connection: OssConnection {
+                    root: uuid::Uuid::new_v4().to_string(),
+                    access_key_id: env::var("GT_OSS_ACCESS_KEY_ID").unwrap().into(),
+                    access_key_secret: env::var("GT_OSS_ACCESS_KEY").unwrap().into(),
+                    bucket: env::var("GT_OSS_BUCKET").unwrap(),
+                    endpoint: env::var("GT_OSS_ENDPOINT").unwrap(),
+                    ..Default::default()
+                },
                 ..Default::default()
             };
 
             let builder = Oss::default()
-                .root(&oss_config.root)
-                .endpoint(&oss_config.endpoint)
-                .access_key_id(oss_config.access_key_id.expose_secret())
-                .access_key_secret(oss_config.access_key_secret.expose_secret())
-                .bucket(&oss_config.bucket);
+                .root(&oss_config.connection.root)
+                .endpoint(&oss_config.connection.endpoint)
+                .access_key_id(oss_config.connection.access_key_id.expose_secret())
+                .access_key_secret(oss_config.connection.access_key_secret.expose_secret())
+                .bucket(&oss_config.connection.bucket);
 
             let config = ObjectStoreConfig::Oss(oss_config);
 
@@ -237,16 +249,16 @@ pub fn get_test_store_config(store_type: &StorageType) -> (ObjectStoreConfig, Te
             }
 
             let mut builder = S3::default()
-                .root(&s3_config.root)
-                .access_key_id(s3_config.access_key_id.expose_secret())
-                .secret_access_key(s3_config.secret_access_key.expose_secret())
-                .bucket(&s3_config.bucket);
+                .root(&s3_config.connection.root)
+                .access_key_id(s3_config.connection.access_key_id.expose_secret())
+                .secret_access_key(s3_config.connection.secret_access_key.expose_secret())
+                .bucket(&s3_config.connection.bucket);
 
-            if s3_config.endpoint.is_some() {
-                builder = builder.endpoint(s3_config.endpoint.as_ref().unwrap());
+            if s3_config.connection.endpoint.is_some() {
+                builder = builder.endpoint(s3_config.connection.endpoint.as_ref().unwrap());
             };
-            if s3_config.region.is_some() {
-                builder = builder.region(s3_config.region.as_ref().unwrap());
+            if s3_config.connection.region.is_some() {
+                builder = builder.region(s3_config.connection.region.as_ref().unwrap());
             };
 
             let config = ObjectStoreConfig::S3(s3_config);

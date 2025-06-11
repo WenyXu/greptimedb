@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use config::{AzblobConnection, GcsConnection, OssConnection, S3Connection};
 pub use opendal::raw::{Access, HttpClient};
 pub use opendal::{
     services, Buffer, Builder as ObjectStoreBuilder, Entry, EntryMode, Error, ErrorKind,
@@ -19,6 +20,7 @@ pub use opendal::{
     Writer,
 };
 
+mod config;
 pub mod layers;
 pub mod manager;
 mod metrics;
