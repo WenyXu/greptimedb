@@ -12,19 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use object_store::services::Azblob;
-use object_store::ObjectStore;
-use snafu::prelude::*;
-
-use crate::config::AzblobConfig;
-use crate::error::{self, Result};
-use crate::store::build_http_client;
-
-pub(crate) async fn new_azblob_object_store(azblob_config: &AzblobConfig) -> Result<ObjectStore> {
-    let client = build_http_client(&azblob_config.http_client)?;
-    let builder = Azblob::from(&azblob_config.connection).http_client(client);
-
-    Ok(ObjectStore::new(builder)
-        .context(error::InitBackendSnafu)?
-        .finish())
-}
+pub(crate) mod object_store;

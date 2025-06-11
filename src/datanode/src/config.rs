@@ -17,7 +17,6 @@
 use core::time::Duration;
 
 use common_base::readable_size::ReadableSize;
-use common_base::secrets::{ExposeSecret, SecretString};
 use common_config::{Configurable, DEFAULT_DATA_HOME};
 pub use common_procedure::options::ProcedureConfig;
 use common_telemetry::logging::{LoggingOptions, TracingOptions};
@@ -27,6 +26,7 @@ use file_engine::config::EngineConfig as FileEngineConfig;
 use meta_client::MetaClientOptions;
 use metric_engine::config::EngineConfig as MetricEngineConfig;
 use mito2::config::MitoConfig;
+use object_store::{AzblobConnection, GcsConnection, OssConnection, S3Connection};
 use query::options::QueryOptions;
 use serde::{Deserialize, Serialize};
 use servers::export_metrics::ExportMetricsOption;
@@ -157,195 +157,48 @@ impl Default for HttpClientConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct S3Config {
     pub name: String,
-    pub bucket: String,
-    pub root: String,
-    #[serde(skip_serializing)]
-    pub access_key_id: SecretString,
-    #[serde(skip_serializing)]
-    pub secret_access_key: SecretString,
-    pub endpoint: Option<String>,
-    pub region: Option<String>,
-    /// Enable virtual host style so that opendal will send API requests in virtual host style instead of path style.
-    /// By default, opendal will send API to https://s3.us-east-1.amazonaws.com/bucket_name
-    /// Enabled, opendal will send API to https://bucket_name.s3.us-east-1.amazonaws.com
-    pub enable_virtual_host_style: bool,
+    #[serde(flatten)]
+    pub connection: S3Connection,
     #[serde(flatten)]
     pub cache: ObjectStorageCacheConfig,
     pub http_client: HttpClientConfig,
 }
 
-impl PartialEq for S3Config {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-            && self.bucket == other.bucket
-            && self.root == other.root
-            && self.access_key_id.expose_secret() == other.access_key_id.expose_secret()
-            && self.secret_access_key.expose_secret() == other.secret_access_key.expose_secret()
-            && self.endpoint == other.endpoint
-            && self.region == other.region
-            && self.enable_virtual_host_style == other.enable_virtual_host_style
-            && self.cache == other.cache
-            && self.http_client == other.http_client
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct OssConfig {
     pub name: String,
-    pub bucket: String,
-    pub root: String,
-    #[serde(skip_serializing)]
-    pub access_key_id: SecretString,
-    #[serde(skip_serializing)]
-    pub access_key_secret: SecretString,
-    pub endpoint: String,
+    #[serde(flatten)]
+    pub connection: OssConnection,
     #[serde(flatten)]
     pub cache: ObjectStorageCacheConfig,
     pub http_client: HttpClientConfig,
 }
 
-impl PartialEq for OssConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-            && self.bucket == other.bucket
-            && self.root == other.root
-            && self.access_key_id.expose_secret() == other.access_key_id.expose_secret()
-            && self.access_key_secret.expose_secret() == other.access_key_secret.expose_secret()
-            && self.endpoint == other.endpoint
-            && self.cache == other.cache
-            && self.http_client == other.http_client
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct AzblobConfig {
     pub name: String,
-    pub container: String,
-    pub root: String,
-    #[serde(skip_serializing)]
-    pub account_name: SecretString,
-    #[serde(skip_serializing)]
-    pub account_key: SecretString,
-    pub endpoint: String,
-    pub sas_token: Option<String>,
+    #[serde(flatten)]
+    pub connection: AzblobConnection,
     #[serde(flatten)]
     pub cache: ObjectStorageCacheConfig,
     pub http_client: HttpClientConfig,
 }
 
-impl PartialEq for AzblobConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-            && self.container == other.container
-            && self.root == other.root
-            && self.account_name.expose_secret() == other.account_name.expose_secret()
-            && self.account_key.expose_secret() == other.account_key.expose_secret()
-            && self.endpoint == other.endpoint
-            && self.sas_token == other.sas_token
-            && self.cache == other.cache
-            && self.http_client == other.http_client
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct GcsConfig {
     pub name: String,
-    pub root: String,
-    pub bucket: String,
-    pub scope: String,
-    #[serde(skip_serializing)]
-    pub credential_path: SecretString,
-    #[serde(skip_serializing)]
-    pub credential: SecretString,
-    pub endpoint: String,
+    #[serde(flatten)]
+    pub connection: GcsConnection,
     #[serde(flatten)]
     pub cache: ObjectStorageCacheConfig,
     pub http_client: HttpClientConfig,
-}
-
-impl PartialEq for GcsConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-            && self.root == other.root
-            && self.bucket == other.bucket
-            && self.scope == other.scope
-            && self.credential_path.expose_secret() == other.credential_path.expose_secret()
-            && self.credential.expose_secret() == other.credential.expose_secret()
-            && self.endpoint == other.endpoint
-            && self.cache == other.cache
-            && self.http_client == other.http_client
-    }
-}
-
-impl Default for S3Config {
-    fn default() -> Self {
-        Self {
-            name: String::default(),
-            bucket: String::default(),
-            root: String::default(),
-            access_key_id: SecretString::from(String::default()),
-            secret_access_key: SecretString::from(String::default()),
-            enable_virtual_host_style: false,
-            endpoint: Option::default(),
-            region: Option::default(),
-            cache: ObjectStorageCacheConfig::default(),
-            http_client: HttpClientConfig::default(),
-        }
-    }
-}
-
-impl Default for OssConfig {
-    fn default() -> Self {
-        Self {
-            name: String::default(),
-            bucket: String::default(),
-            root: String::default(),
-            access_key_id: SecretString::from(String::default()),
-            access_key_secret: SecretString::from(String::default()),
-            endpoint: String::default(),
-            cache: ObjectStorageCacheConfig::default(),
-            http_client: HttpClientConfig::default(),
-        }
-    }
-}
-
-impl Default for AzblobConfig {
-    fn default() -> Self {
-        Self {
-            name: String::default(),
-            container: String::default(),
-            root: String::default(),
-            account_name: SecretString::from(String::default()),
-            account_key: SecretString::from(String::default()),
-            endpoint: String::default(),
-            sas_token: Option::default(),
-            cache: ObjectStorageCacheConfig::default(),
-            http_client: HttpClientConfig::default(),
-        }
-    }
-}
-
-impl Default for GcsConfig {
-    fn default() -> Self {
-        Self {
-            name: String::default(),
-            root: String::default(),
-            bucket: String::default(),
-            scope: String::default(),
-            credential_path: SecretString::from(String::default()),
-            credential: SecretString::from(String::default()),
-            endpoint: String::default(),
-            cache: ObjectStorageCacheConfig::default(),
-            http_client: HttpClientConfig::default(),
-        }
-    }
 }
 
 impl Default for ObjectStoreConfig {
@@ -507,9 +360,12 @@ mod tests {
             ObjectStoreConfig::S3(cfg) => {
                 assert_eq!(
                     "SecretBox<alloc::string::String>([REDACTED])".to_string(),
-                    format!("{:?}", cfg.access_key_id)
+                    format!("{:?}", cfg.connection.access_key_id)
                 );
-                assert_eq!("access_key_id", cfg.access_key_id.expose_secret());
+                assert_eq!(
+                    "access_key_id",
+                    cfg.connection.access_key_id.expose_secret()
+                );
             }
             _ => unreachable!(),
         }
