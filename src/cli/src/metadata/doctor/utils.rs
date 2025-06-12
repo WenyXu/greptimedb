@@ -55,6 +55,7 @@ pub struct TableMetadataIterator {
 }
 
 pub struct FullTableMetadata {
+    pub table_id: TableId,
     pub table_info: RawTableInfo,
     pub table_route: TableRouteValue,
 }
@@ -158,6 +159,7 @@ impl TableMetadataIterator {
             .into_inner();
 
         Ok(FullTableMetadata {
+            table_id,
             table_info,
             table_route,
         })

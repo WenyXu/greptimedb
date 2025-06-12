@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::sync::Arc;
 use std::u64;
 
 use async_trait::async_trait;
@@ -14,18 +14,15 @@ use futures::TryStreamExt;
 use mito2::region::opener::RegionMetadataLoader;
 use mito2::region::options::RegionOptions;
 use object_store::manager::{ObjectStoreManager, ObjectStoreManagerRef};
-use object_store::ObjectStore;
-use snafu::{OptionExt, ResultExt};
+use snafu::ResultExt;
 use store_api::path_utils::region_dir;
 use store_api::storage::RegionId;
 
 use crate::common::object_store::ObjectStoreConfig;
-use crate::error::{
-    InvalidArgumentsSnafu, MitoSnafu, ObjectStoreNotSetSnafu, Result, UnexpectedSnafu,
-};
+use crate::error::{InvalidArgumentsSnafu, MitoSnafu, ObjectStoreNotSetSnafu, Result};
 use crate::metadata::common::StoreConfig;
 use crate::metadata::doctor::utils::{
-    DatanodeTableIterator, FullTableMetadata, IteratorInput, RegionNumbers,
+    DatanodeTableIterator, FullTableMetadata, IteratorInput, RegionNumbers, TableMetadataIterator,
 };
 use crate::Tool;
 
@@ -98,7 +95,7 @@ impl DiagnoseCommand {
             .object_store
             .build()?
             .ok_or_else(|| BoxedError::new(ObjectStoreNotSetSnafu.build()))?;
-        let object_store_manager = ObjectStoreManager::new("", object_store);
+        let object_store_manager = Arc::new(ObjectStoreManager::new("", object_store));
         Ok(Box::new(DiagnoseTool {
             table_id: self.table_id,
             table_names: self.table_names.clone(),
@@ -130,16 +127,62 @@ struct DiagnoseTool {
 #[async_trait]
 impl Tool for DiagnoseTool {
     async fn do_work(&self) -> std::result::Result<(), BoxedError> {
-        todo!()
+        let iterator_input = self
+            .generate_iterator_input()
+            .await
+            .map_err(BoxedError::new)?;
+        let mut table_metadata_iterator = Box::pin(
+            TableMetadataIterator::new(self.kvbackend.clone(), iterator_input).into_stream(),
+        );
+
+        while let Some((full_table_metadata, region_numbers)) = table_metadata_iterator
+            .try_next()
+            .await
+            .map_err(BoxedError::new)?
+        {
+            if !full_table_metadata.is_physical_table() {
+                let catalog_name = &full_table_metadata.table_info.catalog_name;
+                let schema_name = &full_table_metadata.table_info.schema_name;
+                let table_name = &full_table_metadata.table_info.name;
+                warn!(
+                    "Table({}) is not a physical table, skipped",
+                    format_full_table_name(catalog_name, schema_name, table_name)
+                );
+                continue;
+            }
+
+            let region_numbers = match region_numbers {
+                RegionNumbers::All => full_table_metadata.table_route.region_numbers(),
+                RegionNumbers::Partial(region_numbers) => region_numbers,
+            };
+
+            for region_number in region_numbers {
+                let region_id = RegionId::new(full_table_metadata.table_id, region_number);
+                let region_metadata_exists = self
+                    .diagnose_region(region_id, &full_table_metadata)
+                    .await
+                    .map_err(BoxedError::new)?;
+                if !region_metadata_exists {
+                    warn!("Region metadata not found, region_id: {}", region_id);
+
+                    if !self.no_fail_fast {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
 impl DiagnoseTool {
+    /// Returns true if the region metadata exists.
     async fn diagnose_region(
         &self,
         region_id: RegionId,
         full_table_metadata: &FullTableMetadata,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let loader = RegionMetadataLoader::new(
             self.compress_manifest,
             self.manifest_checkpoint_distance,
@@ -148,49 +191,18 @@ impl DiagnoseTool {
 
         let catalog_name = &full_table_metadata.table_info.catalog_name;
         let schema_name = &full_table_metadata.table_info.schema_name;
-        let table_name = &full_table_metadata.table_info.name;
         let region_dir = region_dir(&region_storage_path(&catalog_name, &schema_name), region_id);
         let opts = full_table_metadata.table_info.to_region_options();
         // TODO(weny): We ignore WAL options now. We should `prepare_wal_options()` in the future.
         let region_options = RegionOptions::try_from(&opts).context(MitoSnafu)?;
         // TODO(weny): handle the case that the metadata is not found.
-        let region_metadata = loader
+        let region_metadata_exists = loader
             .load(&region_dir, &region_options)
             .await
             .context(MitoSnafu)?
-            .context(UnexpectedSnafu {
-                msg: format!(
-                    "Failed to load region metadata, region_id: {}, table: {}",
-                    region_id,
-                    format_full_table_name(catalog_name, schema_name, table_name)
-                ),
-            })?;
+            .is_some();
 
-        let raw_schema = &full_table_metadata.table_info.meta.schema;
-        let metadata_schema_len = raw_schema.column_schemas.len();
-        let region_manifest_schema_len = region_metadata.schema.column_schemas().len();
-
-        let metadata_column_schemas = &raw_schema
-            .column_schemas
-            .iter()
-            .map(|c| (&c.name, c))
-            .collect::<HashMap<_, _>>();
-        let region_manfiest_column_schemas = &region_metadata
-            .column_metadatas
-            .iter()
-            .map(|c| (&c.column_schema.name, &c.column_schema))
-            .collect::<HashMap<_, _>>();
-
-        if metadata_schema_len != region_manifest_schema_len {
-            warn!(
-                "The schema length of the table is not consistent, table: {}, metadata_schema_len: {}, region_manifest_schema_len: {}",
-                format_full_table_name(catalog_name, schema_name, table_name),
-                metadata_schema_len,
-                region_manifest_schema_len
-            );
-        }
-
-        todo!()
+        Ok(region_metadata_exists)
     }
 
     /// Generates the iterator input based on the command line arguments.
