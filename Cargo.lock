@@ -1948,6 +1948,7 @@ checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 name = "cli"
 version = "0.15.0"
 dependencies = [
+ "async-stream",
  "async-trait",
  "auth",
  "base64 0.22.1",
@@ -1971,6 +1972,7 @@ dependencies = [
  "common-time",
  "common-version",
  "common-wal",
+ "datanode",
  "datatypes",
  "either",
  "etcd-client",
@@ -1978,8 +1980,10 @@ dependencies = [
  "humantime",
  "meta-client",
  "meta-srv",
+ "mito2",
  "nu-ansi-term",
  "object-store",
+ "paste",
  "query",
  "rand 0.9.0",
  "reqwest",
@@ -8060,6 +8064,7 @@ version = "0.15.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "common-base",
  "common-telemetry",
  "common-test-util",
  "futures",
@@ -8068,6 +8073,7 @@ dependencies = [
  "moka",
  "opendal",
  "prometheus",
+ "serde",
  "tokio",
  "uuid",
 ]

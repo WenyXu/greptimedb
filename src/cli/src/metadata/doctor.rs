@@ -12,36 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod common;
-mod control;
-mod doctor;
-mod snapshot;
+mod diagnose;
+mod utils;
 
 use clap::Subcommand;
 use common_error::ext::BoxedError;
 
-use crate::metadata::control::ControlCommand;
-use crate::metadata::doctor::DoctorCommand;
-use crate::metadata::snapshot::SnapshotCommand;
+use crate::metadata::doctor::diagnose::DiagnoseCommand;
 use crate::Tool;
 
-/// Command for managing metadata operations, including saving metadata snapshots and restoring metadata from snapshots.
 #[derive(Subcommand)]
-pub enum MetadataCommand {
-    #[clap(subcommand)]
-    Snapshot(SnapshotCommand),
-    #[clap(subcommand)]
-    Control(ControlCommand),
-    #[clap(subcommand)]
-    Doctor(DoctorCommand),
+pub enum DoctorCommand {
+    Diagnose(DiagnoseCommand),
 }
 
-impl MetadataCommand {
+impl DoctorCommand {
     pub async fn build(&self) -> Result<Box<dyn Tool>, BoxedError> {
         match self {
-            MetadataCommand::Snapshot(cmd) => cmd.build().await,
-            MetadataCommand::Control(cmd) => cmd.build().await,
-            MetadataCommand::Doctor(cmd) => cmd.build().await,
+            DoctorCommand::Diagnose(cmd) => cmd.build().await,
         }
     }
 }

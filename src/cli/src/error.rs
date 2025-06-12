@@ -73,6 +73,27 @@ pub enum Error {
         source: common_meta::error::Error,
     },
 
+    #[snafu(display("Mito error"))]
+    Mito {
+        source: mito2::error::Error,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
+    #[snafu(display("Failed to get table metadata"))]
+    TableMetadata {
+        #[snafu(implicit)]
+        location: Location,
+        source: common_meta::error::Error,
+    },
+
+    #[snafu(display("Unexpected error: {}", msg))]
+    Unexpected {
+        msg: String,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
     #[snafu(display("Missing config, msg: {}", msg))]
     MissingConfig {
         msg: String,
@@ -267,6 +288,20 @@ pub enum Error {
         #[snafu(implicit)]
         location: Location,
     },
+
+    #[snafu(display("Failed to init backend"))]
+    InitBackend {
+        #[snafu(implicit)]
+        location: Location,
+        #[snafu(source)]
+        error: ObjectStoreError,
+    },
+
+    #[snafu(display("Object store not set"))]
+    ObjectStoreNotSet {
+        #[snafu(implicit)]
+        location: Location,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -274,10 +309,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl ErrorExt for Error {
     fn status_code(&self) -> StatusCode {
         match self {
-            Error::InitMetadata { source, .. } | Error::InitDdlManager { source, .. } => {
-                source.status_code()
-            }
+            Error::InitMetadata { source, .. }
+            | Error::InitDdlManager { source, .. }
+            | Error::TableMetadata { source, .. } => source.status_code(),
 
+            Error::Mito { source, .. } => source.status_code(),
             Error::MissingConfig { .. }
             | Error::LoadLayeredConfig { .. }
             | Error::IllegalConfig { .. }
@@ -297,6 +333,7 @@ impl ErrorExt for Error {
             Error::ParseSql { source, .. } | Error::PlanStatement { source, .. } => {
                 source.status_code()
             }
+            Error::Unexpected { .. } => StatusCode::Unexpected,
 
             Error::SerdeJson { .. }
             | Error::FileIo { .. }
@@ -305,9 +342,10 @@ impl ErrorExt for Error {
             | Error::BuildClient { .. } => StatusCode::Unexpected,
 
             Error::Other { source, .. } => source.status_code(),
-            Error::OpenDal { .. } => StatusCode::Internal,
+            Error::OpenDal { .. } | Error::InitBackend { .. } => StatusCode::Internal,
             Error::S3ConfigNotSet { .. }
             | Error::OutputDirNotSet { .. }
+            | Error::ObjectStoreNotSet { .. }
             | Error::EmptyStoreAddrs { .. } => StatusCode::InvalidArguments,
 
             Error::BuildRuntime { source, .. } => source.status_code(),

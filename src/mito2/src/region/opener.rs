@@ -216,7 +216,8 @@ impl RegionOpener {
         let metadata = Arc::new(metadata);
         // Create a manifest manager for this region and writes regions to the manifest file.
         let region_manifest_options = Self::manifest_options(
-            config,
+            config.compress_manifest,
+            config.manifest_checkpoint_distance,
             &options,
             &self.region_dir,
             &self.object_store_manager,
@@ -347,7 +348,8 @@ impl RegionOpener {
         let region_options = self.options.as_ref().unwrap().clone();
 
         let region_manifest_options = Self::manifest_options(
-            config,
+            config.compress_manifest,
+            config.manifest_checkpoint_distance,
             &region_options,
             &self.region_dir,
             &self.object_store_manager,
@@ -463,7 +465,8 @@ impl RegionOpener {
 
     /// Returns a new manifest options.
     fn manifest_options(
-        config: &MitoConfig,
+        compress_manifest: bool,
+        manifest_checkpoint_distance: u64,
         options: &RegionOptions,
         region_dir: &str,
         object_store_manager: &ObjectStoreManagerRef,
@@ -474,8 +477,8 @@ impl RegionOpener {
             object_store,
             // We don't allow users to set the compression algorithm as we use it as a file suffix.
             // Currently, the manifest storage doesn't have good support for changing compression algorithms.
-            compress_type: manifest_compress_type(config.compress_manifest),
-            checkpoint_distance: config.manifest_checkpoint_distance,
+            compress_type: manifest_compress_type(compress_manifest),
+            checkpoint_distance: manifest_checkpoint_distance,
         })
     }
 }
@@ -499,15 +502,21 @@ pub fn get_object_store(
 
 /// A loader for loading metadata from a region dir.
 pub struct RegionMetadataLoader {
-    config: Arc<MitoConfig>,
+    compress_manifest: bool,
+    manifest_checkpoint_distance: u64,
     object_store_manager: ObjectStoreManagerRef,
 }
 
 impl RegionMetadataLoader {
     /// Creates a new `RegionOpenerBuilder`.
-    pub fn new(config: Arc<MitoConfig>, object_store_manager: ObjectStoreManagerRef) -> Self {
+    pub fn new(
+        compress_manifest: bool,
+        manifest_checkpoint_distance: u64,
+        object_store_manager: ObjectStoreManagerRef,
+    ) -> Self {
         Self {
-            config,
+            compress_manifest,
+            manifest_checkpoint_distance,
             object_store_manager,
         }
     }
@@ -519,7 +528,7 @@ impl RegionMetadataLoader {
         region_options: &RegionOptions,
     ) -> Result<Option<RegionMetadataRef>> {
         let manifest = self.load_manifest(region_dir, region_options).await?;
-        Ok(manifest.map(|m| m.metadata.clone()))
+        Ok(manifest.map(|m: Arc<RegionManifest>| m.metadata.clone()))
     }
 
     /// Loads the manifest of the region from the region dir.
@@ -529,7 +538,8 @@ impl RegionMetadataLoader {
         region_options: &RegionOptions,
     ) -> Result<Option<Arc<RegionManifest>>> {
         let region_manifest_options = RegionOpener::manifest_options(
-            &self.config,
+            self.compress_manifest,
+            self.manifest_checkpoint_distance,
             region_options,
             region_dir,
             &self.object_store_manager,

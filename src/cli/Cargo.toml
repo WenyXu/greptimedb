@@ -16,6 +16,7 @@ mysql_kvbackend = ["common-meta/mysql_kvbackend", "meta-srv/mysql_kvbackend"]
 workspace = true
 
 [dependencies]
+async-stream = "0.3"
 async-trait.workspace = true
 auth.workspace = true
 base64.workspace = true
@@ -41,6 +42,7 @@ common-telemetry = { workspace = true, features = [
 common-time.workspace = true
 common-version.workspace = true
 common-wal.workspace = true
+datanode.workspace = true
 datatypes.workspace = true
 either = "1.8"
 etcd-client.workspace = true
@@ -48,8 +50,10 @@ futures.workspace = true
 humantime.workspace = true
 meta-client.workspace = true
 meta-srv.workspace = true
+mito2.workspace = true
 nu-ansi-term = "0.46"
 object-store.workspace = true
+paste.workspace = true
 query.workspace = true
 rand.workspace = true
 reqwest.workspace = true
