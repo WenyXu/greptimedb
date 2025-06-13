@@ -13,23 +13,27 @@
 // limitations under the License.
 
 mod diagnose;
+mod repair;
 mod utils;
 
 use clap::Subcommand;
 use common_error::ext::BoxedError;
 
 use crate::metadata::doctor::diagnose::DiagnoseCommand;
+use crate::metadata::doctor::repair::RepairLogicalTablesCommand;
 use crate::Tool;
 
 #[derive(Subcommand)]
 pub enum DoctorCommand {
     Diagnose(DiagnoseCommand),
+    RepairLogicalTables(RepairLogicalTablesCommand),
 }
 
 impl DoctorCommand {
     pub async fn build(&self) -> Result<Box<dyn Tool>, BoxedError> {
         match self {
             DoctorCommand::Diagnose(cmd) => cmd.build().await,
+            DoctorCommand::RepairLogicalTables(cmd) => cmd.build().await,
         }
     }
 }

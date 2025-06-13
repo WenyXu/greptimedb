@@ -16,6 +16,7 @@
 use std::collections::VecDeque;
 
 use async_stream::try_stream;
+use common_catalog::consts::METRIC_ENGINE;
 use common_catalog::format_full_table_name;
 use common_meta::key::table_name::TableNameKey;
 use common_meta::key::table_route::TableRouteValue;
@@ -64,6 +65,20 @@ impl FullTableMetadata {
     /// Returns true if it's [TableRouteValue::Physical].
     pub fn is_physical_table(&self) -> bool {
         self.table_route.is_physical()
+    }
+
+    /// Returns true if it's a metric engine table.
+    pub fn is_metric_engine(&self) -> bool {
+        self.table_info.meta.engine == METRIC_ENGINE
+    }
+
+    /// Returns the full table name.
+    pub fn full_table_name(&self) -> String {
+        format_full_table_name(
+            &self.table_info.catalog_name,
+            &self.table_info.schema_name,
+            &self.table_info.name,
+        )
     }
 }
 

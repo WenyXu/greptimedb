@@ -236,7 +236,7 @@ impl DiagnoseTool {
         }
 
         InvalidArgumentsSnafu {
-            msg: "You must specify either --table-id or --table-name or --region-id or --datanode-id.",
+            msg: "You must specify either --table-id or --table-names or --region-id or --datanode-id.",
         }
         .fail()
     }

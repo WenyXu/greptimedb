@@ -53,6 +53,7 @@ meta-srv.workspace = true
 mito2.workspace = true
 nu-ansi-term = "0.46"
 object-store.workspace = true
+operator.workspace = true
 paste.workspace = true
 query.workspace = true
 rand.workspace = true
