@@ -135,6 +135,7 @@ impl RepairTool {
         let table_metadata_manager = TableMetadataManager::new(self.kv_backend.clone());
 
         let mut skipped_table = 0;
+        let mut success_table = 0;
         while let Some((full_table_metadata, _)) = table_metadata_iterator.try_next().await? {
             let full_table_name = full_table_metadata.full_table_name();
             if !full_table_metadata.is_metric_engine() {
@@ -176,8 +177,15 @@ impl RepairTool {
                 if !self.no_fail_fast {
                     return Err(err);
                 }
+            } else {
+                success_table += 1;
             }
         }
+
+        info!(
+            "Repair logical tables result: {} tables repaired, {} tables skipped",
+            success_table, skipped_table
+        );
 
         Ok(())
     }
@@ -301,6 +309,11 @@ impl RepairTool {
                 .await
             {
                 errors.push(err);
+            } else {
+                info!(
+                    "Created table on datanode: {} for table: {}",
+                    peer.id, full_table_name
+                );
             }
         }
 
