@@ -106,14 +106,14 @@ impl TableMetadataIterator {
     pub async fn next(&mut self) -> Result<Option<(FullTableMetadata, RegionNumbers)>> {
         match &mut self.input {
             IteratorInput::TableIds(table_ids) => {
-                while let Some((table_id, regions)) = table_ids.pop_front() {
+                if let Some((table_id, regions)) = table_ids.pop_front() {
                     let full_table_metadata = self.get_table_metadata(table_id).await?;
                     return Ok(Some((full_table_metadata, regions)));
                 }
             }
 
             IteratorInput::TableNames(table_names) => {
-                while let Some(full_table_name) = table_names.pop_front() {
+                if let Some(full_table_name) = table_names.pop_front() {
                     let table_id = self.get_table_id_by_name(full_table_name).await?;
                     let full_table_metadata = self.get_table_metadata(table_id).await?;
                     return Ok(Some((full_table_metadata, RegionNumbers::All)));
@@ -200,7 +200,7 @@ impl DatanodeTableIterator {
     ///
     /// If there are no more datanodes to iterate over, it will return `None`.
     pub async fn next(&mut self) -> Result<Option<VecDeque<(TableId, RegionNumbers)>>> {
-        while let Some(datanode_id) = self.input.pop_front() {
+        if let Some(datanode_id) = self.input.pop_front() {
             let table_ids = self.get_datanode_table_ids(datanode_id).await?;
             return Ok(Some(table_ids));
         }

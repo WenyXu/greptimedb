@@ -31,10 +31,12 @@ pub fn generate_alter_table_expr_for_all_columns(
 ) -> Result<AlterTableExpr> {
     let schema = &table_info.meta.schema;
 
-    let mut alter_table_expr = AlterTableExpr::default();
-    alter_table_expr.catalog_name = table_info.catalog_name.to_string();
-    alter_table_expr.schema_name = table_info.schema_name.to_string();
-    alter_table_expr.table_name = table_info.name.to_string();
+    let mut alter_table_expr = AlterTableExpr {
+        catalog_name: table_info.catalog_name.to_string(),
+        schema_name: table_info.schema_name.to_string(),
+        table_name: table_info.name.to_string(),
+        ..Default::default()
+    };
 
     let primary_keys = table_info
         .meta

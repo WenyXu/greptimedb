@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::u64;
 
 use async_trait::async_trait;
 use clap::Parser;
@@ -191,7 +190,7 @@ impl DiagnoseTool {
 
         let catalog_name = &full_table_metadata.table_info.catalog_name;
         let schema_name = &full_table_metadata.table_info.schema_name;
-        let region_dir = region_dir(&region_storage_path(&catalog_name, &schema_name), region_id);
+        let region_dir = region_dir(&region_storage_path(catalog_name, schema_name), region_id);
         let opts = full_table_metadata.table_info.to_region_options();
         // TODO(weny): We ignore WAL options now. We should `prepare_wal_options()` in the future.
         let region_options = RegionOptions::try_from(&opts).context(MitoSnafu)?;

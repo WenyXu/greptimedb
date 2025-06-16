@@ -23,7 +23,6 @@ use clap::Parser;
 use client::api::v1::CreateTableExpr;
 use client::client_manager::NodeClients;
 use client::{DEFAULT_CATALOG_NAME, DEFAULT_SCHEMA_NAME};
-use common_catalog::format_full_table_name;
 use common_error::ext::{BoxedError, ErrorExt};
 use common_error::status_code::StatusCode;
 use common_grpc::channel_manager::ChannelConfig;
@@ -39,8 +38,7 @@ use snafu::ResultExt;
 use store_api::storage::TableId;
 
 use crate::error::{
-    self, Error, InvalidArgumentsSnafu, Result, SendRequestToDatanodeSnafu, TableMetadataSnafu,
-    UnexpectedSnafu,
+    InvalidArgumentsSnafu, Result, SendRequestToDatanodeSnafu, TableMetadataSnafu, UnexpectedSnafu,
 };
 use crate::metadata::common::StoreConfig;
 use crate::metadata::doctor::utils::{FullTableMetadata, IteratorInput, TableMetadataIterator};
