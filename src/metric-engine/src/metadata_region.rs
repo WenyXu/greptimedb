@@ -174,10 +174,14 @@ impl MetadataRegion {
         let region_column_prefix = Self::concat_column_key_prefix(logical_region_id);
 
         let mut columns = vec![];
-        for (k, v) in self
+        let all_columns = self
             .get_all_with_prefix(metadata_region_id, &region_column_prefix)
-            .await?
-        {
+            .await?;
+        common_telemetry::info!("read logical_region_id: {}", logical_region_id);
+        for (k, v) in &all_columns {
+            common_telemetry::info!("k: {}, v: {}", k, v);
+        }
+        for (k, v) in all_columns {
             if !k.starts_with(&region_column_prefix) {
                 continue;
             }
@@ -508,6 +512,9 @@ impl MetadataRegion {
                 ))
             })
             .collect::<Vec<_>>();
+        for (key, value) in &iter {
+            common_telemetry::info!("key: {}, value: {}", key, value);
+        }
 
         let put_request = MetadataRegion::build_put_request_from_iter(iter.into_iter());
         self.mito

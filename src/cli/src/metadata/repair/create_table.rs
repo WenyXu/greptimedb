@@ -39,6 +39,11 @@ pub fn generate_create_table_expr(table_info: &RawTableInfo) -> Result<CreateTab
 
     let timestamp_index = schema.timestamp_index.as_ref().unwrap();
     let time_index = schema.column_schemas[*timestamp_index].name.clone();
+    common_telemetry::info!(
+        "primary_keys: {:?}, time_index: {}",
+        primary_keys,
+        time_index
+    );
     let column_defs = column_schemas_to_defs(schema.column_schemas.clone(), &primary_keys)
         .context(CovertColumnSchemasToDefsSnafu)?;
     let table_options = HashMap::from(&table_info.meta.options);

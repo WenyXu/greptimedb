@@ -263,6 +263,12 @@ impl DummyTableProviderFactory {
         engine: RegionEngineRef,
         ctx: Option<&session::context::QueryContext>,
     ) -> Result<DummyTableProvider> {
+        common_telemetry::info!(
+            "engine: {}, region_id: {}, metadata: {:?}",
+            engine.name(),
+            region_id,
+            engine.get_metadata(region_id).await
+        );
         let metadata =
             engine
                 .get_metadata(region_id)

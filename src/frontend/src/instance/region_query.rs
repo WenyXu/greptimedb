@@ -80,6 +80,14 @@ impl FrontendRegionQueryHandler {
         client
             .handle_query(request)
             .await
+            .inspect_err(|e| {
+                common_telemetry::error!(
+                    e;
+                    "region_id: {}, peer: {}",
+                    region_id,
+                    peer
+                );
+            })
             .context(RequestQuerySnafu)
     }
 }

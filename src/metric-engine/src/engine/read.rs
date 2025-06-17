@@ -38,7 +38,11 @@ impl MetricEngineInner {
         request: ScanRequest,
     ) -> Result<RegionScannerRef> {
         let is_reading_physical_region = self.is_physical_region(region_id);
-
+        common_telemetry::info!(
+            "is_reading_physical_region: {}, region_id: {}",
+            is_reading_physical_region,
+            region_id,
+        );
         if is_reading_physical_region {
             debug!(
                 "Metric region received read request {request:?} on physical region {region_id:?}"
@@ -184,6 +188,11 @@ impl MetricEngineInner {
             .iter()
             .map(|i| all_logical_columns[*i].clone())
             .collect::<Vec<_>>();
+        common_telemetry::info!(
+            "all logical columns: {:?}, logical region: {:?}",
+            all_logical_columns,
+            logical_region_id
+        );
 
         // generate physical projection
         let mut physical_projection = Vec::with_capacity(origin_projection.len());
@@ -211,6 +220,11 @@ impl MetricEngineInner {
         let logical_columns = self
             .load_logical_column_names(physical_region_id, logical_region_id)
             .await?;
+        common_telemetry::info!(
+            "all logical columns: {:?}, logical region: {:?}",
+            logical_columns,
+            logical_region_id
+        );
         let mut projection = Vec::with_capacity(logical_columns.len());
         let data_region_id = utils::to_data_region_id(physical_region_id);
         let physical_metadata = self
@@ -234,6 +248,14 @@ impl MetricEngineInner {
         let logical_columns = self
             .load_logical_columns(physical_region_id, logical_region_id)
             .await?;
+        common_telemetry::info!(
+            "logical_region_id: {}, logical_columns: {:?}",
+            logical_region_id,
+            logical_columns
+                .iter()
+                .map(|col| &col.column_schema.name)
+                .collect::<Vec<_>>(),
+        );
 
         let primary_keys = logical_columns
             .iter()

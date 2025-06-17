@@ -202,6 +202,7 @@ pub(crate) enum LogStoreImpl {
 /// Env to test mito engine.
 pub struct TestEnv {
     /// Path to store data.
+    existing_data_home: Option<String>,
     data_home: TempDir,
     log_store: Option<LogStoreImpl>,
     log_store_factory: LogStoreFactory,
@@ -221,6 +222,7 @@ impl TestEnv {
     pub fn new() -> TestEnv {
         let (schema_metadata_manager, kv_backend) = mock_schema_metadata_manager();
         TestEnv {
+            existing_data_home: None,
             data_home: create_temp_dir(""),
             log_store: None,
             log_store_factory: LogStoreFactory::RaftEngine(RaftEngineLogStoreFactory),
@@ -234,7 +236,22 @@ impl TestEnv {
     pub fn with_prefix(prefix: &str) -> TestEnv {
         let (schema_metadata_manager, kv_backend) = mock_schema_metadata_manager();
         TestEnv {
+            existing_data_home: None,
             data_home: create_temp_dir(prefix),
+            log_store: None,
+            log_store_factory: LogStoreFactory::RaftEngine(RaftEngineLogStoreFactory),
+            object_store_manager: None,
+            schema_metadata_manager,
+            kv_backend,
+        }
+    }
+
+    /// Returns a new env with specific `data_home` for test.
+    pub fn with_existing_data_home(data_home: &str) -> TestEnv {
+        let (schema_metadata_manager, kv_backend) = mock_schema_metadata_manager();
+        TestEnv {
+            existing_data_home: Some(data_home.to_string()),
+            data_home: create_temp_dir(""),
             log_store: None,
             log_store_factory: LogStoreFactory::RaftEngine(RaftEngineLogStoreFactory),
             object_store_manager: None,
@@ -247,6 +264,7 @@ impl TestEnv {
     pub fn with_data_home(data_home: TempDir) -> TestEnv {
         let (schema_metadata_manager, kv_backend) = mock_schema_metadata_manager();
         TestEnv {
+            existing_data_home: None,
             data_home,
             log_store: None,
             log_store_factory: LogStoreFactory::RaftEngine(RaftEngineLogStoreFactory),
@@ -569,9 +587,16 @@ impl TestEnv {
 
     /// Returns the log store and object store manager.
     async fn create_log_and_object_store_manager(&self) -> (LogStoreImpl, ObjectStoreManager) {
-        let data_home = self.data_home.path();
-        let wal_path = data_home.join("wal");
-        let object_store_manager = self.create_object_store_manager();
+        let (object_store_manager, wal_path) =
+            if let Some(existing_data_home) = &self.existing_data_home {
+                let data_home = Path::new(existing_data_home);
+                let wal_path = data_home.join("wal");
+                (self.create_object_store_manager(), wal_path)
+            } else {
+                let data_home = self.data_home.path();
+                let wal_path = data_home.join("wal");
+                (self.create_object_store_manager(), wal_path)
+            };
 
         match &self.log_store_factory {
             LogStoreFactory::RaftEngine(factory) => {
@@ -593,8 +618,13 @@ impl TestEnv {
     }
 
     fn create_object_store_manager(&self) -> ObjectStoreManager {
-        let data_home = self.data_home.path();
-        let data_path = data_home.join("data").as_path().display().to_string();
+        let data_path = if let Some(existing_data_home) = &self.existing_data_home {
+            existing_data_home.to_string()
+        } else {
+            let data_home = self.data_home.path();
+            data_home.join("data").as_path().display().to_string()
+        };
+
         let builder = Fs::default().root(&data_path);
         let object_store = ObjectStore::new(builder).unwrap().finish();
         ObjectStoreManager::new("default", object_store)

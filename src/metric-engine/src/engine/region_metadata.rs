@@ -55,6 +55,14 @@ impl MetricEngineInner {
             .into_iter()
             .map(|(_, column_metadata)| column_metadata)
             .collect::<Vec<_>>();
+        common_telemetry::info!(
+            "load columns from metadta region, logical_region_id: {}, logical_column_metadata: {:?}",
+            logical_region_id,
+            logical_column_metadata
+                .iter()
+                .map(|col| (&col.column_schema.name, col.column_id))
+                .collect::<Vec<_>>()
+        );
 
         // Update cache
         let mut mutable_state = self.state.write().unwrap();

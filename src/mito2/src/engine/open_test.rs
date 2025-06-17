@@ -15,19 +15,38 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use api::v1::Rows;
+use api::v1::value::ValueData;
+use api::v1::{Rows, SemanticType};
 use common_error::ext::ErrorExt;
 use common_error::status_code::StatusCode;
 use common_recordbatch::RecordBatches;
+use common_time::{Timestamp, FOREVER};
+use datafusion_expr::{col, lit};
+use datatypes::prelude::ConcreteDataType;
+use datatypes::schema::ColumnSchema;
+use datatypes::value::Value;
+use object_store::util::join_dir;
+use store_api::metadata::ColumnMetadata;
+use store_api::metric_engine_consts::{
+    METADATA_REGION_SUBDIR, METADATA_SCHEMA_KEY_COLUMN_INDEX, METADATA_SCHEMA_KEY_COLUMN_NAME,
+    METADATA_SCHEMA_TIMESTAMP_COLUMN_INDEX, METADATA_SCHEMA_TIMESTAMP_COLUMN_NAME,
+    METADATA_SCHEMA_VALUE_COLUMN_INDEX, METADATA_SCHEMA_VALUE_COLUMN_NAME,
+    METRIC_METADATA_REGION_GROUP,
+};
+use store_api::mito_engine_options::{
+    APPEND_MODE_KEY, MEMTABLE_PARTITION_TREE_PRIMARY_KEY_ENCODING, SKIP_WAL_KEY, TTL_KEY,
+};
 use store_api::region_engine::{RegionEngine, RegionRole};
 use store_api::region_request::{
-    RegionCloseRequest, RegionOpenRequest, RegionPutRequest, RegionRequest,
+    RegionCloseRequest, RegionCompactRequest, RegionCreateRequest, RegionFlushRequest,
+    RegionOpenRequest, RegionPutRequest, RegionRequest,
 };
 use store_api::storage::{RegionId, ScanRequest};
 use tokio::sync::oneshot;
 
 use crate::compaction::compactor::{open_compaction_region, OpenCompactionRegionRequest};
 use crate::config::MitoConfig;
+use crate::engine::MITO_ENGINE_NAME;
 use crate::error;
 use crate::region::options::RegionOptions;
 use crate::test_util::{
@@ -480,4 +499,352 @@ async fn test_open_compaction_region() {
     .unwrap();
 
     assert_eq!(region_id, compaction_region.region_id);
+}
+
+pub(crate) fn region_options_for_metadata_region(
+    mut original: HashMap<String, String>,
+) -> HashMap<String, String> {
+    // TODO(ruihang, weny): add whitelist for metric engine options.
+    original.remove(APPEND_MODE_KEY);
+    // Don't allow to set primary key encoding for metadata region.
+    original.remove(MEMTABLE_PARTITION_TREE_PRIMARY_KEY_ENCODING);
+    original.insert(TTL_KEY.to_string(), FOREVER.to_string());
+    original.remove(SKIP_WAL_KEY);
+    original
+}
+
+pub fn concat_column_key_prefix(region_id: RegionId) -> String {
+    format!("__column_{}_", region_id.as_u64())
+}
+
+fn build_prefix_read_request(prefix: &str, key_only: bool) -> ScanRequest {
+    let filter_expr = col(METADATA_SCHEMA_KEY_COLUMN_NAME).like(lit(prefix));
+
+    let projection = if key_only {
+        vec![METADATA_SCHEMA_KEY_COLUMN_INDEX]
+    } else {
+        vec![
+            METADATA_SCHEMA_KEY_COLUMN_INDEX,
+            METADATA_SCHEMA_VALUE_COLUMN_INDEX,
+        ]
+    };
+    ScanRequest {
+        projection: Some(projection),
+        filters: vec![filter_expr],
+        ..Default::default()
+    }
+}
+
+pub fn create_request_for_metadata_region(
+    region_dir: &str,
+    options: HashMap<String, String>,
+) -> RegionCreateRequest {
+    // ts TIME INDEX DEFAULT 0
+    let timestamp_column_metadata = ColumnMetadata {
+        column_id: METADATA_SCHEMA_TIMESTAMP_COLUMN_INDEX as _,
+        semantic_type: SemanticType::Timestamp,
+        column_schema: ColumnSchema::new(
+            METADATA_SCHEMA_TIMESTAMP_COLUMN_NAME,
+            ConcreteDataType::timestamp_millisecond_datatype(),
+            false,
+        )
+        .with_default_constraint(Some(datatypes::schema::ColumnDefaultConstraint::Value(
+            Value::Timestamp(Timestamp::new_millisecond(0)),
+        )))
+        .unwrap(),
+    };
+    // key STRING PRIMARY KEY
+    let key_column_metadata = ColumnMetadata {
+        column_id: METADATA_SCHEMA_KEY_COLUMN_INDEX as _,
+        semantic_type: SemanticType::Tag,
+        column_schema: ColumnSchema::new(
+            METADATA_SCHEMA_KEY_COLUMN_NAME,
+            ConcreteDataType::string_datatype(),
+            false,
+        ),
+    };
+    // val STRING
+    let value_column_metadata = ColumnMetadata {
+        column_id: METADATA_SCHEMA_VALUE_COLUMN_INDEX as _,
+        semantic_type: SemanticType::Field,
+        column_schema: ColumnSchema::new(
+            METADATA_SCHEMA_VALUE_COLUMN_NAME,
+            ConcreteDataType::string_datatype(),
+            true,
+        ),
+    };
+
+    // concat region dir
+    let metadata_region_dir = join_dir(&region_dir, METADATA_REGION_SUBDIR);
+
+    let options = region_options_for_metadata_region(options.clone());
+    RegionCreateRequest {
+        engine: MITO_ENGINE_NAME.to_string(),
+        column_metadatas: vec![
+            timestamp_column_metadata,
+            key_column_metadata,
+            value_column_metadata,
+        ],
+        primary_key: vec![METADATA_SCHEMA_KEY_COLUMN_INDEX as _],
+        options,
+        region_dir: metadata_region_dir,
+    }
+}
+
+#[tokio::test]
+async fn test_open_metadata_region() {
+    common_telemetry::init_default_ut_logging();
+    let mut env =
+        TestEnv::with_existing_data_home("/home/weny/Projects/greptimedb/src/mito2/src/engine");
+    let mut mito_config = MitoConfig::default();
+    mito_config
+        .sanitize(&env.data_home().display().to_string())
+        .unwrap();
+
+    let options = HashMap::from([
+        ("physical_metric_table".to_string(), "".to_string()),
+        ("memtable.type".to_string(), "partition_tree".to_string()),
+        ("index.type".to_string(), "inverted".to_string()),
+    ]);
+    let dir = "/metadata";
+    let engine = env.create_engine(mito_config.clone()).await;
+
+    let options = region_options_for_metadata_region(options.clone());
+    engine
+        .handle_request(
+            RegionId::new(1024, 0),
+            RegionRequest::Open(RegionOpenRequest {
+                engine: String::new(),
+                region_dir: dir.to_string(),
+                options,
+                skip_wal_replay: true,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let reqgion_column_prefix = concat_column_key_prefix(RegionId::new(1026, 0));
+    // let request = build_prefix_read_request(&reqgion_column_prefix, false);
+    let stream = engine
+        .scan_to_stream(RegionId::new(1024, 0), ScanRequest::default())
+        .await
+        .unwrap();
+    let batches = RecordBatches::try_collect(stream).await.unwrap();
+    println!("{}", batches.pretty_print().unwrap());
+}
+
+pub(crate) fn build_put_request_from_iter(
+    kv: impl Iterator<Item = (String, String)>,
+) -> RegionPutRequest {
+    let cols = vec![
+        api::v1::ColumnSchema {
+            column_name: METADATA_SCHEMA_TIMESTAMP_COLUMN_NAME.to_string(),
+            datatype: api::v1::ColumnDataType::TimestampMillisecond as _,
+            semantic_type: SemanticType::Timestamp as _,
+            ..Default::default()
+        },
+        api::v1::ColumnSchema {
+            column_name: METADATA_SCHEMA_KEY_COLUMN_NAME.to_string(),
+            datatype: api::v1::ColumnDataType::String as _,
+            semantic_type: SemanticType::Tag as _,
+            ..Default::default()
+        },
+        api::v1::ColumnSchema {
+            column_name: METADATA_SCHEMA_VALUE_COLUMN_NAME.to_string(),
+            datatype: api::v1::ColumnDataType::String as _,
+            semantic_type: SemanticType::Field as _,
+            ..Default::default()
+        },
+    ];
+    let rows = Rows {
+        schema: cols,
+        rows: kv
+            .into_iter()
+            .map(|(key, value)| api::v1::Row {
+                values: vec![
+                    api::v1::Value {
+                        value_data: Some(ValueData::TimestampMillisecondValue(0)),
+                    },
+                    api::v1::Value {
+                        value_data: Some(ValueData::StringValue(key)),
+                    },
+                    api::v1::Value {
+                        value_data: Some(ValueData::StringValue(value)),
+                    },
+                ],
+            })
+            .collect(),
+    };
+
+    RegionPutRequest { rows, hint: None }
+}
+
+fn write_region_4406636445696() -> Vec<(String, String)> {
+    vec![
+        (
+            "__column_4406636445696_aW5zdGFuY2U".to_string(),
+            r#"{"column_schema":{"name":"instance","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":7}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_aG9zdA".to_string(),
+            r#"{"column_schema":{"name":"host","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":6}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_bmFtZXNwYWNl".to_string(),
+            r#"{"column_schema":{"name":"namespace","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":2}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_am9i".to_string(),
+            r#"{"column_schema":{"name":"job","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":8}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_ZW52".to_string(),
+            r#"{"column_schema":{"name":"env","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":5}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_Z3JlcHRpbWVfdmFsdWU".to_string(),
+            r#"{"column_schema":{"name":"greptime_value","data_type":{"Float64":{}},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{}},"semantic_type":"Field","column_id":1}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_Z3JlcHRpbWVfdGltZXN0YW1w".to_string(),
+            r#"{"column_schema":{"name":"greptime_timestamp","data_type":{"Timestamp":{"Millisecond":null}},"is_nullable":false,"is_time_index":true,"default_constraint":null,"metadata":{"greptime:time_index":"true"}},"semantic_type":"Timestamp","column_id":0}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_YXBw".to_string(),
+            r#"{"column_schema":{"name":"app","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":3}"#.to_string(),
+        ),
+        (
+            "__region_4406636445696".to_string(),
+            "".to_string(),
+        ),
+    ]
+}
+
+fn write_region_4402341478400() -> Vec<(String, String)> {
+    vec![
+        (
+            "__column_4402341478400_bmFtZXNwYWNl".to_string(),
+            r#"{"column_schema":{"name":"namespace","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":2}"#.to_string(),
+        ),
+        (
+            "__column_4402341478400_Z3JlcHRpbWVfdmFsdWU".to_string(),
+            r#"{"column_schema":{"name":"greptime_value","data_type":{"Float64":{}},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{}},"semantic_type":"Field","column_id":1}"#.to_string(),
+        ),
+        (
+            "__column_4402341478400_Y2xvdWRfcHJvdmlkZXI".to_string(),
+            r#"{"column_schema":{"name":"cloud_provider","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":4}"#.to_string(),
+        ),
+        (
+            "__column_4402341478400_YXBw".to_string(),
+            r#"{"column_schema":{"name":"app","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":3}"#.to_string(),
+        ),
+        (
+            "__column_4402341478400_aG9zdA".to_string(),
+            r#"{"column_schema":{"name":"host","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":6}"#.to_string(),
+        ),
+        (
+            "__column_4402341478400_ZW52".to_string(),
+            r#"{"column_schema":{"name":"env","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":5}"#.to_string(),
+        ),
+        (
+            "__column_4402341478400_Z3JlcHRpbWVfdGltZXN0YW1w".to_string(),
+            r#"{"column_schema":{"name":"greptime_timestamp","data_type":{"Timestamp":{"Millisecond":null}},"is_nullable":false,"is_time_index":true,"default_constraint":null,"metadata":{"greptime:time_index":"true"}},"semantic_type":"Timestamp","column_id":0}"#.to_string(),
+        ),
+        (
+            "__region_4402341478400".to_string(),
+            "".to_string(),
+        )
+    ]
+}
+
+pub fn to_metadata_region_id(region_id: RegionId) -> RegionId {
+    let table_id = region_id.table_id();
+    let region_sequence = region_id.region_sequence();
+    RegionId::with_group_and_seq(table_id, METRIC_METADATA_REGION_GROUP, region_sequence)
+}
+
+#[tokio::test]
+async fn test_write_metadata_region() {
+    common_telemetry::init_default_ut_logging();
+    let mut env = TestEnv::with_prefix("write-metadata-region");
+    let engine = env.create_engine(MitoConfig::default()).await;
+
+    let options = HashMap::from([
+        ("physical_metric_table".to_string(), "".to_string()),
+        ("memtable.type".to_string(), "partition_tree".to_string()),
+        ("index.type".to_string(), "inverted".to_string()),
+    ]);
+
+    let reigon_id = RegionId::new(1024, 0);
+    engine
+        .handle_request(
+            to_metadata_region_id(reigon_id),
+            RegionRequest::Create(create_request_for_metadata_region("/metadata", options)),
+        )
+        .await
+        .unwrap();
+
+    let kv = write_region_4406636445696();
+    let req = build_put_request_from_iter(kv.into_iter());
+    engine
+        .handle_request(RegionId::new(1024, 0), RegionRequest::Put(req))
+        .await
+        .unwrap();
+
+    engine
+        .handle_request(
+            RegionId::new(1024, 0),
+            RegionRequest::Flush(RegionFlushRequest {
+                row_group_size: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let kv = write_region_4402341478400();
+    let req = build_put_request_from_iter(kv.into_iter());
+    engine
+        .handle_request(RegionId::new(1024, 0), RegionRequest::Put(req))
+        .await
+        .unwrap();
+    engine
+        .handle_request(
+            RegionId::new(1024, 0),
+            RegionRequest::Flush(RegionFlushRequest {
+                row_group_size: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let kv = write_region_4406636445696();
+    let req = build_put_request_from_iter(kv.into_iter());
+    engine
+        .handle_request(RegionId::new(1024, 0), RegionRequest::Put(req))
+        .await
+        .unwrap();
+    engine
+        .handle_request(
+            RegionId::new(1024, 0),
+            RegionRequest::Flush(RegionFlushRequest {
+                row_group_size: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+    engine
+        .handle_request(
+            RegionId::new(1024, 0),
+            RegionRequest::Compact(RegionCompactRequest::default()),
+        )
+        .await
+        .unwrap();
+
+    let stream = engine
+        .scan_to_stream(RegionId::new(1024, 0), ScanRequest::default())
+        .await
+        .unwrap();
+    let batches = RecordBatches::try_collect(stream).await.unwrap();
+    println!("{}", batches.pretty_print().unwrap());
 }

@@ -74,6 +74,10 @@ impl Datanode for RegionRequester {
             .map_err(BoxedError::new)
             .context(meta_error::ExternalSnafu)?
             .to_vec();
+
+        let plan_schema = request.plan.schema().clone();
+        let original_plan = request.plan.clone();
+        let region_id = request.region_id;
         let request = api::v1::region::QueryRequest {
             header: request.header,
             region_id: request.region_id.as_u64(),
@@ -86,6 +90,15 @@ impl Datanode for RegionRequester {
         self.do_get_inner(ticket)
             .await
             .map_err(BoxedError::new)
+            .inspect_err(|e| {
+                common_telemetry::error!(
+                    e;
+                    "plan: {:?}, plan schema: {:?}, region_id: {}",
+                    original_plan,
+                    plan_schema,
+                    region_id
+                );
+            })
             .context(meta_error::ExternalSnafu)
     }
 }
