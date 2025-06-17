@@ -541,6 +541,11 @@ impl TreeIter {
 
         debug_assert!(part_reader.is_valid());
         let batch = part_reader.convert_current_batch()?;
+        common_telemetry::info!(
+            "region_id: {:?}, batch: {:?}",
+            part_reader.region_id(),
+            batch
+        );
         part_reader.next()?;
         if part_reader.is_valid() {
             self.metrics.rows_fetched += batch.num_rows();

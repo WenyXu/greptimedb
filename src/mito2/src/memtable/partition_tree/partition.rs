@@ -25,7 +25,7 @@ use common_recordbatch::filter::SimpleFilterEvaluator;
 use store_api::codec::PrimaryKeyEncoding;
 use store_api::metadata::RegionMetadataRef;
 use store_api::metric_engine_consts::DATA_SCHEMA_TABLE_ID_COLUMN_NAME;
-use store_api::storage::ColumnId;
+use store_api::storage::{ColumnId, RegionId};
 
 use crate::error::Result;
 use crate::memtable::key_values::KeyValue;
@@ -79,6 +79,7 @@ impl Partition {
 
         // Finds key in shards, now we ensure one key only exists in one shard.
         if let Some(pk_id) = inner.find_key_in_shards(primary_key) {
+            common_telemetry::info!("primary_key: {:?}, pk_id: {:?}", primary_key, pk_id);
             inner.write_to_shard(pk_id, &key_value)?;
             inner.num_rows += 1;
             return Ok(());
@@ -99,6 +100,11 @@ impl Partition {
                         metrics,
                     );
                     inner.pk_to_pk_id.insert(sparse_key, pk_id);
+                    common_telemetry::info!(
+                        "re-encode(dense) primary_key: {:?}, pk_id: {:?}",
+                        primary_key,
+                        pk_id
+                    );
                 }
                 PrimaryKeyEncoding::Sparse => {
                     let sparse_key = primary_key.clone();
@@ -109,6 +115,11 @@ impl Partition {
                         metrics,
                     );
                     inner.pk_to_pk_id.insert(sparse_key, pk_id);
+                    common_telemetry::info!(
+                        "re-encode(sparse) primary_key: {:?}, pk_id: {:?}",
+                        primary_key,
+                        pk_id
+                    );
                 }
             }
         } else {
@@ -116,6 +127,11 @@ impl Partition {
             let pk_id = inner
                 .shard_builder
                 .write_with_key(primary_key, None, &key_value, metrics);
+            common_telemetry::info!(
+                "non re-encode primary_key: {:?}, pk_id: {:?}",
+                primary_key,
+                pk_id
+            );
             inner.pk_to_pk_id.insert(std::mem::take(primary_key), pk_id);
         };
 
@@ -339,6 +355,10 @@ impl PartitionReader {
         let reader = Self { context, source };
 
         Ok(reader)
+    }
+
+    pub fn region_id(&self) -> RegionId {
+        self.context.metadata.region_id
     }
 
     /// Returns true if the reader is valid.

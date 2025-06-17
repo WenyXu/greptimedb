@@ -162,6 +162,11 @@ impl KeyDictBuilder {
     pub fn read(&self) -> DictBuilderReader {
         let sorted_pk_indices = self.pk_to_index.values().map(|v| v.0).collect();
         let block = self.key_buffer.finish_cloned();
+        common_telemetry::info!(
+            "sorted_pk_indices: {:?}, block: {:?}",
+            sorted_pk_indices,
+            block
+        );
         let mut blocks = Vec::with_capacity(self.dict_blocks.len() + 1);
         blocks.extend_from_slice(&self.dict_blocks);
         blocks.push(block);
@@ -350,7 +355,7 @@ impl KeyBuffer {
 /// A block in the key dictionary.
 ///
 /// The block is cheap to clone. Keys in the block are unsorted.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct DictBlock {
     /// Container of keys in the block.
     keys: BinaryArray,

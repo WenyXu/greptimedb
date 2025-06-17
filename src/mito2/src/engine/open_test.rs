@@ -775,10 +775,10 @@ async fn test_write_metadata_region() {
         ("index.type".to_string(), "inverted".to_string()),
     ]);
 
-    let reigon_id = RegionId::new(1024, 0);
+    let region_id = RegionId::new(1024, 0);
     engine
         .handle_request(
-            to_metadata_region_id(reigon_id),
+            region_id,
             RegionRequest::Create(create_request_for_metadata_region("/metadata", options)),
         )
         .await
@@ -817,7 +817,8 @@ async fn test_write_metadata_region() {
         .await
         .unwrap();
 
-    let kv = write_region_4406636445696();
+    let mut kv = write_region_4406636445696();
+    kv.remove(kv.len() - 1);
     let req = build_put_request_from_iter(kv.into_iter());
     engine
         .handle_request(RegionId::new(1024, 0), RegionRequest::Put(req))
@@ -843,6 +844,47 @@ async fn test_write_metadata_region() {
 
     let stream = engine
         .scan_to_stream(RegionId::new(1024, 0), ScanRequest::default())
+        .await
+        .unwrap();
+    let batches = RecordBatches::try_collect(stream).await.unwrap();
+    println!("{}", batches.pretty_print().unwrap());
+}
+
+#[tokio::test]
+async fn test_open_metadata_region2() {
+    common_telemetry::init_default_ut_logging();
+    let mut env =
+        TestEnv::with_existing_data_home("/home/weny/Projects/greptimedb/src/mito2/src/engine");
+    let mut mito_config = MitoConfig::default();
+    mito_config
+        .sanitize(&env.data_home().display().to_string())
+        .unwrap();
+
+    let options = HashMap::from([
+        ("physical_metric_table".to_string(), "".to_string()),
+        ("memtable.type".to_string(), "partition_tree".to_string()),
+        ("index.type".to_string(), "inverted".to_string()),
+    ]);
+    let dir = "/metadata2";
+    let engine = env.create_engine(mito_config.clone()).await;
+
+    let region_id = to_metadata_region_id(RegionId::new(1027, 1));
+    let options = region_options_for_metadata_region(options.clone());
+    engine
+        .handle_request(
+            region_id,
+            RegionRequest::Open(RegionOpenRequest {
+                engine: String::new(),
+                region_dir: dir.to_string(),
+                options,
+                skip_wal_replay: false,
+            }),
+        )
+        .await
+        .unwrap();
+
+    let stream = engine
+        .scan_to_stream(region_id, ScanRequest::default())
         .await
         .unwrap();
     let batches = RecordBatches::try_collect(stream).await.unwrap();
