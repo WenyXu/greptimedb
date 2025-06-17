@@ -720,6 +720,47 @@ fn write_region_4406636445696() -> Vec<(String, String)> {
     ]
 }
 
+fn write_region_4406636445696_2() -> Vec<(String, String)> {
+    vec![
+        (
+            "__column_4406636445696_Z3JlcHRpbWVfdGltZXN0YW1w".to_string(),
+            r#"{"column_schema":{"name":"greptime_timestamp","data_type":{"Timestamp":{"Millisecond":null}},"is_nullable":false,"is_time_index":true,"default_constraint":null,"metadata":{"greptime:time_index":"true"}},"semantic_type":"Timestamp","column_id":0}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_aG9zdA".to_string(),
+            r#"{"column_schema":{"name":"host","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":6}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_bmFtZXNwYWNl".to_string(),
+            r#"{"column_schema":{"name":"namespace","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":2}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_am9i".to_string(),
+            r#"{"column_schema":{"name":"job","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":8}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_aW5zdGFuY2U".to_string(),
+            r#"{"column_schema":{"name":"instance","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":7}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_ZW52".to_string(),
+            r#"{"column_schema":{"name":"env","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":5}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_Z3JlcHRpbWVfdmFsdWU".to_string(),
+            r#"{"column_schema":{"name":"greptime_value","data_type":{"Float64":{}},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{}},"semantic_type":"Field","column_id":1}"#.to_string(),
+        ),
+        (
+            "__column_4406636445696_YXBw".to_string(),
+            r#"{"column_schema":{"name":"app","data_type":{"String":null},"is_nullable":true,"is_time_index":false,"default_constraint":null,"metadata":{"greptime:inverted_index":"true"}},"semantic_type":"Tag","column_id":3}"#.to_string(),
+        ),
+        (
+            "__region_4406636445696".to_string(),
+            "".to_string(),
+        ),
+    ]
+}
+
 fn write_region_4402341478400() -> Vec<(String, String)> {
     vec![
         (
@@ -817,8 +858,7 @@ async fn test_write_metadata_region() {
         .await
         .unwrap();
 
-    let mut kv = write_region_4406636445696();
-    kv.remove(kv.len() - 1);
+    let kv = write_region_4406636445696_2();
     let req = build_put_request_from_iter(kv.into_iter());
     engine
         .handle_request(RegionId::new(1024, 0), RegionRequest::Put(req))

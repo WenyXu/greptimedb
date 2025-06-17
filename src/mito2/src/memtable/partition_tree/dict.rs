@@ -133,7 +133,15 @@ impl KeyDictBuilder {
         // Computes key position and then alter pk index.
         let mut key_positions = vec![0; self.pk_to_index.len()];
 
-        for (i, (_full_pk, (pk_index, sparse_key))) in (std::mem::take(&mut self.pk_to_index))
+        for (full_pk, (pk_index, sparse_key)) in &self.pk_to_index {
+            common_telemetry::info!(
+                "full_pk: {:?}, pk_index: {:?}, sparse_key: {:?}",
+                full_pk,
+                pk_index,
+                sparse_key
+            );
+        }
+        for (i, (full_pk, (pk_index, sparse_key))) in (std::mem::take(&mut self.pk_to_index))
             .into_iter()
             .enumerate()
         {
@@ -142,6 +150,7 @@ impl KeyDictBuilder {
             if let Some(sparse_key) = sparse_key {
                 pk_to_index_map.insert(sparse_key, i as PkIndex);
             }
+            pk_to_index_map.insert(full_pk, i as PkIndex);
         }
 
         self.num_keys = 0;
