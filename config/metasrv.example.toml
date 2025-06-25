@@ -43,11 +43,12 @@ use_memory_store = false
 ## - Using shared storage (e.g., s3).
 enable_region_failover = false
 
-## Delay before initializing region failure detectors.
-## This delay helps prevent premature initialization of region failure detectors in cases where
-## cluster maintenance mode is enabled right after metasrv starts, especially when the cluster
-## is not deployed via the recommended GreptimeDB Operator. Without this delay, early detector registration
-## may trigger unnecessary region failovers during datanode startup.
+## Delay for registering region failure detectors.
+## Helps prevent premature initialization of region failure detectors
+## when cluster maintenance mode is not immediately enabled after metasrv startup,
+## especially when the cluster is not deployed through the recommended GreptimeDB Operator.
+## Without this delay, registering region failure detectors before all datanodes are fully started
+## may trigger unnecessary region failover during startup.
 region_failure_detector_initialization_delay = '10m'
 
 ## Whether to allow region failover on local WAL.
