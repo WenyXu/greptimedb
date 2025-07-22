@@ -562,6 +562,9 @@ pub enum AlterKind {
         /// Name of columns to drop.
         names: Vec<String>,
     },
+    SyncColumns {
+        column_metadatas: Vec<ColumnMetadata>,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -740,6 +743,68 @@ impl AlterKind {
                     .iter()
                     .try_for_each(|name| Self::validate_column_to_drop(name, metadata))?;
             }
+            AlterKind::SyncColumns { column_metadatas } => {
+                // TODO(weny): Add tests
+                let new_primary_keys = column_metadatas
+                    .iter()
+                    .filter(|c| c.semantic_type == SemanticType::Tag)
+                    .map(|c| (c.column_schema.name.as_str(), c.column_id))
+                    .collect::<HashMap<_, _>>();
+
+                let old_primary_keys = metadata
+                    .column_metadatas
+                    .iter()
+                    .filter(|c| c.semantic_type == SemanticType::Tag)
+                    .map(|c| (c.column_schema.name.as_str(), c.column_id));
+
+                for (name, id) in old_primary_keys {
+                    let primary_key =
+                        new_primary_keys
+                            .get(name)
+                            .context(InvalidRegionRequestSnafu {
+                                region_id: metadata.region_id,
+                                err: format!("column {} is not a primary key", name),
+                            })?;
+
+                    ensure!(
+                        *primary_key == id,
+                        InvalidRegionRequestSnafu {
+                            region_id: metadata.region_id,
+                            err: format!(
+                                "column with same name {} has different id, existing: {}, got: {}",
+                                name, id, primary_key
+                            ),
+                        }
+                    );
+                }
+
+                let new_ts_column = column_metadatas
+                    .iter()
+                    .find(|c| c.semantic_type == SemanticType::Timestamp)
+                    .map(|c| (c.column_schema.name.as_str(), c.column_id))
+                    .context(InvalidRegionRequestSnafu {
+                        region_id: metadata.region_id,
+                        err: "timestamp column not found",
+                    })?;
+
+                // Safety: timestamp column must exist.
+                let old_ts_column = column_metadatas
+                    .iter()
+                    .find(|c| c.semantic_type == SemanticType::Timestamp)
+                    .map(|c| (c.column_schema.name.as_str(), c.column_id))
+                    .unwrap();
+
+                ensure!(
+                    new_ts_column == old_ts_column,
+                    InvalidRegionRequestSnafu {
+                        region_id: metadata.region_id,
+                        err: format!(
+                            "timestamp column {} has different id, existing: {}, got: {}",
+                            old_ts_column.0, old_ts_column.1, new_ts_column.1
+                        ),
+                    }
+                );
+            }
         }
         Ok(())
     }
@@ -772,6 +837,9 @@ impl AlterKind {
             AlterKind::DropDefaults { names } => names
                 .iter()
                 .any(|name| metadata.column_by_name(name).is_some()),
+            AlterKind::SyncColumns { column_metadatas } => {
+                metadata.column_metadatas != *column_metadatas
+            }
         }
     }
 
@@ -881,6 +949,13 @@ impl TryFrom<alter_request::Kind> for AlterKind {
             },
             alter_request::Kind::DropDefaults(x) => AlterKind::DropDefaults {
                 names: x.drop_defaults.into_iter().map(|x| x.column_name).collect(),
+            },
+            alter_request::Kind::SyncColumns(x) => AlterKind::SyncColumns {
+                column_metadatas: x
+                    .column_defs
+                    .into_iter()
+                    .map(ColumnMetadata::try_from_column_def)
+                    .collect::<Result<Vec<_>>>()?,
             },
         };
 
