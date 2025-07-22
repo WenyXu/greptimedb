@@ -34,6 +34,7 @@ use common_meta::key::TableMetadataManager;
 use common_meta::kv_backend::memory::MemoryKvBackend;
 use common_meta::kv_backend::{KvBackendRef, ResettableKvBackendRef};
 use common_meta::node_manager::NodeManagerRef;
+use common_meta::reconciliation::manager::ReconciliationManager;
 use common_meta::region_keeper::MemoryRegionKeeper;
 use common_meta::region_registry::LeaderRegionRegistry;
 use common_meta::sequence::SequenceBuilder;
@@ -359,7 +360,7 @@ impl MetasrvBuilder {
         let leader_region_registry = Arc::new(LeaderRegionRegistry::default());
 
         let ddl_context = DdlContext {
-            node_manager,
+            node_manager: node_manager.clone(),
             cache_invalidator: cache_invalidator.clone(),
             memory_region_keeper: memory_region_keeper.clone(),
             leader_region_registry: leader_region_registry.clone(),
@@ -445,6 +446,16 @@ impl MetasrvBuilder {
             .to_string_lossy()
             .to_string();
 
+        let reconciliation_manager = Arc::new(ReconciliationManager::new(
+            node_manager.clone(),
+            table_metadata_manager.clone(),
+            cache_invalidator.clone(),
+            procedure_manager.clone(),
+        ));
+        reconciliation_manager
+            .try_start()
+            .context(error::InitReconciliationManagerSnafu)?;
+
         Ok(Metasrv {
             state,
             started: Arc::new(AtomicBool::new(false)),
@@ -480,6 +491,7 @@ impl MetasrvBuilder {
             cache_invalidator,
             leader_region_registry,
             wal_prune_ticker,
+            reconciliation_manager,
         })
     }
 }

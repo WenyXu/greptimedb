@@ -12,4 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod manager;
+// TODO(weny): Remove it
+#[allow(dead_code)]
+pub(crate) mod reconcile_logical_tables;
+// TODO(weny): Remove it
+#[allow(dead_code)]
 pub(crate) mod reconcile_table;
+pub(crate) mod utils;

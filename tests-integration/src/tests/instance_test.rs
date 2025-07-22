@@ -18,23 +18,22 @@ use std::sync::Arc;
 
 use client::{OutputData, DEFAULT_SCHEMA_NAME};
 use common_catalog::consts::DEFAULT_CATALOG_NAME;
-use common_query::Output;
 use common_recordbatch::util;
 use common_test_util::recordbatch::check_output_stream;
 use common_test_util::temp_dir;
 use datatypes::vectors::{StringVector, TimestampMillisecondVector, UInt64Vector, VectorRef};
-use frontend::error::{Error, Result};
+use frontend::error::Error;
 use frontend::instance::Instance;
 use operator::error::Error as OperatorError;
 use rstest::rstest;
 use rstest_reuse::apply;
-use servers::query_handler::sql::SqlQueryHandler;
-use session::context::{QueryContext, QueryContextRef};
+use session::context::QueryContext;
 
 use crate::tests::test_util::{
     both_instances_cases, both_instances_cases_with_custom_storages, check_unordered_output_stream,
-    distributed, distributed_with_multiple_object_stores, find_testing_resource, prepare_path,
-    standalone, standalone_instance_case, standalone_with_multiple_object_stores, MockInstance,
+    distributed, distributed_with_multiple_object_stores, execute_sql, execute_sql_with,
+    find_testing_resource, prepare_path, standalone, standalone_instance_case,
+    standalone_with_multiple_object_stores, try_execute_sql, MockInstance,
 };
 
 #[apply(both_instances_cases)]
@@ -1199,6 +1198,8 @@ async fn test_execute_query_external_table_json_default_ts_column(instance: Arc<
 
 #[apply(standalone_instance_case)]
 async fn test_rename_table(instance: Arc<dyn MockInstance>) {
+    use crate::tests::test_util::{execute_sql_with, try_execute_sql_with};
+
     let instance = instance.frontend();
 
     let output = execute_sql(&instance, "create database db").await.data;
@@ -2058,32 +2059,6 @@ async fn test_information_schema_dot_columns(instance: Arc<dyn MockInstance>) {
 +-----------------+--------------------+---------------+--------------------------+-----------------+---------------+";
 
     check_output_stream(output, expected).await;
-}
-
-async fn execute_sql(instance: &Arc<Instance>, sql: &str) -> Output {
-    execute_sql_with(instance, sql, QueryContext::arc()).await
-}
-
-async fn try_execute_sql(instance: &Arc<Instance>, sql: &str) -> Result<Output> {
-    try_execute_sql_with(instance, sql, QueryContext::arc()).await
-}
-
-async fn try_execute_sql_with(
-    instance: &Arc<Instance>,
-    sql: &str,
-    query_ctx: QueryContextRef,
-) -> Result<Output> {
-    instance.do_query(sql, query_ctx).await.remove(0)
-}
-
-async fn execute_sql_with(
-    instance: &Arc<Instance>,
-    sql: &str,
-    query_ctx: QueryContextRef,
-) -> Output {
-    try_execute_sql_with(instance, sql, query_ctx)
-        .await
-        .unwrap()
 }
 
 #[apply(both_instances_cases_with_custom_storages)]

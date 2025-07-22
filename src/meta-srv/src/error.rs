@@ -99,6 +99,13 @@ pub enum Error {
         source: common_meta::error::Error,
     },
 
+    #[snafu(display("Failed to init reconciliation manager"))]
+    InitReconciliationManager {
+        #[snafu(implicit)]
+        location: Location,
+        source: common_meta::error::Error,
+    },
+
     #[snafu(display("Failed to create default catalog and schema"))]
     InitMetadata {
         #[snafu(implicit)]
@@ -1021,9 +1028,9 @@ impl ErrorExt for Error {
             | Error::UnexpectedLogicalRouteTable { source, .. }
             | Error::UpdateTopicNameValue { source, .. } => source.status_code(),
 
-            Error::InitMetadata { source, .. } | Error::InitDdlManager { source, .. } => {
-                source.status_code()
-            }
+            Error::InitMetadata { source, .. }
+            | Error::InitDdlManager { source, .. }
+            | Error::InitReconciliationManager { source, .. } => source.status_code(),
 
             Error::Other { source, .. } => source.status_code(),
             Error::NoEnoughAvailableNode { .. } => StatusCode::RuntimeResourcesExhausted,

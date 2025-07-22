@@ -35,6 +35,7 @@ use common_meta::leadership_notifier::{
 };
 use common_meta::node_expiry_listener::NodeExpiryListener;
 use common_meta::peer::Peer;
+use common_meta::reconciliation::manager::ReconciliationManagerRef;
 use common_meta::region_keeper::MemoryRegionKeeperRef;
 use common_meta::region_registry::LeaderRegionRegistryRef;
 use common_meta::wal_options_allocator::WalOptionsAllocatorRef;
@@ -442,6 +443,7 @@ pub struct Metasrv {
     cache_invalidator: CacheInvalidatorRef,
     leader_region_registry: LeaderRegionRegistryRef,
     wal_prune_ticker: Option<WalPruneTickerRef>,
+    reconciliation_manager: ReconciliationManagerRef,
 
     plugins: Plugins,
 }
@@ -703,6 +705,10 @@ impl Metasrv {
 
     pub fn region_migration_manager(&self) -> &RegionMigrationManagerRef {
         &self.region_migration_manager
+    }
+
+    pub fn reconciliation_manager(&self) -> &ReconciliationManagerRef {
+        &self.reconciliation_manager
     }
 
     pub fn publish(&self) -> Option<PublisherRef> {

@@ -16,33 +16,18 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use api::v1::SemanticType;
+use common_telemetry::warn;
 use datatypes::schema::ColumnSchema;
 use snafu::{ensure, OptionExt};
 use store_api::metadata::{ColumnMetadata, RegionMetadata};
 use store_api::storage::{RegionId, TableId};
-use table::metadata::RawTableMeta;
+use table::metadata::{RawTableInfo, RawTableMeta};
 use table::table_reference::TableReference;
 
 use crate::error::{
     MismatchColumnIdSnafu, MissingColumnInColumnMetadataSnafu, Result, UnexpectedSnafu,
 };
-
-#[derive(Debug, PartialEq, Eq)]
-struct PartialRegionMetadata<'a> {
-    column_metadatas: &'a [ColumnMetadata],
-    primary_key: &'a [u32],
-    table_id: TableId,
-}
-
-impl<'a> From<&'a RegionMetadata> for PartialRegionMetadata<'a> {
-    fn from(region_metadata: &'a RegionMetadata) -> Self {
-        Self {
-            column_metadatas: &region_metadata.column_metadatas,
-            primary_key: &region_metadata.primary_key,
-            table_id: region_metadata.region_id.table_id(),
-        }
-    }
-}
+use crate::reconciliation::utils::PartialRegionMetadata;
 
 /// A display wrapper for [`ColumnMetadata`] that formats the column metadata in a more readable way.
 struct ColumnMetadataDisplay<'a>(pub &'a ColumnMetadata);
@@ -56,29 +41,6 @@ impl<'a> fmt::Debug for ColumnMetadataDisplay<'a> {
             col.column_schema.name, col.column_id, col.semantic_type, col.column_schema.data_type,
         )
     }
-}
-
-/// Checks if the column metadatas are consistent.
-///
-/// The column metadatas are consistent if:
-/// - The column metadatas are the same.
-/// - The primary key are the same.
-/// - The table id of the region metadatas are the same.
-///
-/// ## Panic
-/// Panic if region_metadatas is empty.
-pub(crate) fn check_column_metadatas_consistent(
-    region_metadatas: &[RegionMetadata],
-) -> Option<Vec<ColumnMetadata>> {
-    let is_column_metadata_consistent = region_metadatas
-        .windows(2)
-        .all(|w| PartialRegionMetadata::from(&w[0]) == PartialRegionMetadata::from(&w[1]));
-
-    if !is_column_metadata_consistent {
-        return None;
-    }
-
-    Some(region_metadatas[0].column_metadatas.clone())
 }
 
 /// Resolves column metadata inconsistencies among the given region metadatas
@@ -182,6 +144,52 @@ pub(crate) fn resolve_column_metadatas_with_latest(
     Ok((latest_region_metadata.column_metadatas.clone(), region_ids))
 }
 
+/// Resolves the column metadata for a logical table by selecting the column metadata
+/// from the region with the maximum number of columns.
+///
+/// # Panics
+/// Panics if `region_metadatas` is empty.
+///
+/// TODO(weny): add tests
+pub(crate) fn resolve_column_metadatas_for_logical_table(
+    region_metadatas: &[RegionMetadata],
+    table_info: &RawTableInfo,
+) -> Result<Vec<ColumnMetadata>> {
+    let is_same_table = region_metadatas
+        .windows(2)
+        .all(|w| w[0].region_id.table_id() == w[1].region_id.table_id());
+
+    ensure!(
+        is_same_table,
+        UnexpectedSnafu {
+            err_msg: "Region metadatas are not from the same table"
+        }
+    );
+
+    let region_metadata = region_metadatas
+        .iter()
+        .max_by_key(|r| r.column_metadatas.len())
+        .unwrap();
+
+    let is_invariant_preserved = check_column_metadatas_invariants_for_logical_table(
+        &region_metadata.column_metadatas,
+        table_info,
+    );
+    ensure!(
+        is_invariant_preserved,
+        UnexpectedSnafu {
+            err_msg: format!(
+                "Column metadata invariants violated for region {}. Resolved column metadata: {:?}, region column metadata: {:?}",
+                region_metadata.region_id,
+                region_metadata.column_metadatas.iter().map(ColumnMetadataDisplay).collect::<Vec<_>>(),
+                region_metadata.column_metadatas.iter().map(ColumnMetadataDisplay).collect::<Vec<_>>()
+            )
+        }
+    );
+
+    Ok(region_metadata.column_metadatas.clone())
+}
+
 /// Constructs a vector of [`ColumnMetadata`] from the provided table information.
 ///
 /// This function maps each [`ColumnSchema`] to its corresponding [`ColumnMetadata`] by
@@ -269,15 +277,17 @@ pub(crate) fn check_column_metadata_invariants(
 /// Builds a [`RawTableMeta`] from the provided [`ColumnMetadata`]s.
 ///
 /// Returns an error if:
-/// - Any column is missing in the `name_to_ids`.
-/// - The column id in table metadata is not the same as the column id in the column metadata.
+/// - Any column is missing in the `name_to_ids`(if `name_to_ids` is provided).
+/// - The column id in table metadata is not the same as the column id in the column metadata.(if `name_to_ids` is provided)
 /// - The table index is missing in the column metadata.
 /// - The primary key or partition key columns are missing in the column metadata.
+///
+/// TODO(weny): add tests
 pub(crate) fn build_table_meta_from_column_metadatas(
     table_id: TableId,
     table_ref: TableReference,
     table_meta: &RawTableMeta,
-    name_to_ids: &HashMap<String, u32>,
+    name_to_ids: Option<HashMap<String, u32>>,
     column_metadata: &[ColumnMetadata],
 ) -> Result<RawTableMeta> {
     let column_in_column_metadata = column_metadata
@@ -306,10 +316,10 @@ pub(crate) fn build_table_meta_from_column_metadatas(
         }
     );
 
-    // Ensures all primary key and partition key exists in the column metadata.
-    for column_name in primary_key_names.iter().chain(partition_key_names.iter()) {
-        let column_in_column_metadata =
-            column_in_column_metadata
+    if let Some(name_to_ids) = &name_to_ids {
+        // Ensures all primary key and partition key exists in the column metadata.
+        for column_name in primary_key_names.iter().chain(partition_key_names.iter()) {
+            let column_in_column_metadata = column_in_column_metadata
                 .get(column_name)
                 .with_context(|| MissingColumnInColumnMetadataSnafu {
                     column_name: column_name.to_string(),
@@ -317,19 +327,25 @@ pub(crate) fn build_table_meta_from_column_metadatas(
                     table_id,
                 })?;
 
-        let column_id = *name_to_ids
-            .get(*column_name)
-            .with_context(|| UnexpectedSnafu {
-                err_msg: format!("column id not found in name_to_ids: {}", column_name),
-            })?;
-        ensure!(
-            column_id == column_in_column_metadata.column_id,
-            MismatchColumnIdSnafu {
-                column_name: column_name.to_string(),
-                column_id,
-                table_name: table_ref.to_string(),
-                table_id,
-            }
+            let column_id = *name_to_ids
+                .get(*column_name)
+                .with_context(|| UnexpectedSnafu {
+                    err_msg: format!("column id not found in name_to_ids: {}", column_name),
+                })?;
+            ensure!(
+                column_id == column_in_column_metadata.column_id,
+                MismatchColumnIdSnafu {
+                    column_name: column_name.to_string(),
+                    column_id,
+                    table_name: table_ref.to_string(),
+                    table_id,
+                }
+            );
+        }
+    } else {
+        warn!(
+            "`name_to_ids` is not provided, table: {}, table_id: {}",
+            table_ref, table_id
         );
     }
 
@@ -340,6 +356,7 @@ pub(crate) fn build_table_meta_from_column_metadatas(
     let time_index = &mut new_raw_table_meta.schema.timestamp_index;
     let columns = &mut new_raw_table_meta.schema.column_schemas;
     let column_ids = &mut new_raw_table_meta.column_ids;
+    let next_column_id = &mut new_raw_table_meta.next_column_id;
 
     column_ids.clear();
     value_indices.clear();
@@ -368,11 +385,70 @@ pub(crate) fn build_table_meta_from_column_metadatas(
         column_ids.push(col.column_id);
     }
 
+    *next_column_id = column_ids
+        .iter()
+        .max()
+        .map(|max| max + 1)
+        .unwrap_or(*next_column_id);
+
     if let Some(time_index) = *time_index {
         new_raw_table_meta.schema.column_schemas[time_index].set_time_index();
     }
 
     Ok(new_raw_table_meta)
+}
+
+/// Checks whether the column metadata invariants hold for the logical table.
+///
+/// Invariants:
+/// - Primary key (Tag) columns must exist in the new metadata.
+/// - Timestamp column must remain exactly the same in name and ID.
+///
+/// TODO(weny): add tests
+pub(crate) fn check_column_metadatas_invariants_for_logical_table(
+    column_metadatas: &[ColumnMetadata],
+    table_info: &RawTableInfo,
+) -> bool {
+    let new_primary_keys = column_metadatas
+        .iter()
+        .filter(|c| c.semantic_type == SemanticType::Tag)
+        .map(|c| c.column_schema.name.as_str())
+        .collect::<HashSet<_>>();
+
+    let old_primary_keys = table_info
+        .meta
+        .primary_key_indices
+        .iter()
+        .map(|i| table_info.meta.schema.column_schemas[*i].name.as_str());
+
+    for name in old_primary_keys {
+        if !new_primary_keys.contains(name) {
+            return false;
+        }
+    }
+
+    let old_timestamp_column_name = table_info
+        .meta
+        .schema
+        .column_schemas
+        .iter()
+        .find(|c| c.is_time_index())
+        .map(|c| c.name.as_str());
+
+    let new_timestamp_column_name = column_metadatas
+        .iter()
+        .find(|c| c.semantic_type == SemanticType::Field)
+        .map(|c| c.column_schema.name.as_str());
+
+    old_timestamp_column_name != new_timestamp_column_name
+}
+
+/// Returns true if the logical table info needs to be updated.
+pub(crate) fn need_update_logical_table_info(
+    table_info: &RawTableInfo,
+    column_metadatas: &[ColumnMetadata],
+) -> bool {
+    table_info.meta.schema.column_schemas.len() != column_metadatas.len()
 }
 
 #[cfg(test)]
@@ -470,7 +546,7 @@ mod tests {
             table_id,
             table_ref,
             &table_meta,
-            &name_to_ids,
+            Some(name_to_ids),
             &column_metadatas,
         )
         .unwrap();
@@ -499,7 +575,7 @@ mod tests {
             table_id,
             table_ref,
             &table_meta,
-            &name_to_ids,
+            Some(name_to_ids),
             &column_metadatas,
         )
         .unwrap_err();
@@ -524,7 +600,7 @@ mod tests {
             table_id,
             table_ref,
             &table_meta,
-            &name_to_ids,
+            Some(name_to_ids),
             &column_metadatas,
         )
         .unwrap_err();
@@ -555,7 +631,7 @@ mod tests {
             table_id,
             table_ref,
             &table_meta,
-            &name_to_ids,
+            Some(name_to_ids.clone()),
             &column_metadatas,
         )
         .unwrap_err();
@@ -569,26 +645,11 @@ mod tests {
             table_id,
             table_ref,
             &table_meta,
-            &name_to_ids,
+            Some(name_to_ids),
             &column_metadatas,
         )
         .unwrap_err();
         assert_matches!(err, Error::MissingColumnInColumnMetadata { .. });
-    }
-
-    #[test]
-    fn test_check_column_metadatas_consistent() {
-        let column_metadatas = new_test_column_metadatas();
-        let region_metadata1 = build_region_metadata(RegionId::new(1024, 0), &column_metadatas);
-        let region_metadata2 = build_region_metadata(RegionId::new(1024, 1), &column_metadatas);
-        let result =
-            check_column_metadatas_consistent(&[region_metadata1, region_metadata2]).unwrap();
-        assert_eq!(result, column_metadatas);
-
-        let region_metadata1 = build_region_metadata(RegionId::new(1025, 0), &column_metadatas);
-        let region_metadata2 = build_region_metadata(RegionId::new(1024, 1), &column_metadatas);
-        let result = check_column_metadatas_consistent(&[region_metadata1, region_metadata2]);
-        assert!(result.is_none());
     }
 
     #[test]

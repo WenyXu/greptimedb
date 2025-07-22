@@ -24,8 +24,12 @@ use common_test_util::find_workspace_path;
 use common_wal::config::kafka::common::{KafkaConnectionConfig, KafkaTopicConfig};
 use common_wal::config::kafka::{DatanodeKafkaConfig, MetasrvKafkaConfig};
 use common_wal::config::{DatanodeWalConfig, MetasrvWalConfig};
+use frontend::error::Result;
 use frontend::instance::Instance;
+use meta_srv::metasrv::Metasrv;
 use rstest_reuse::{self, template};
+use servers::query_handler::sql::SqlQueryHandler;
+use session::context::{QueryContext, QueryContextRef};
 
 use crate::cluster::{GreptimeDbCluster, GreptimeDbClusterBuilder};
 use crate::standalone::{GreptimeDbStandalone, GreptimeDbStandaloneBuilder};
@@ -75,6 +79,15 @@ pub(crate) enum MockInstanceBuilder {
 pub(crate) enum MockInstanceImpl {
     Standalone(GreptimeDbStandalone),
     Distributed(GreptimeDbCluster),
+}
+
+impl MockInstanceImpl {
+    pub(crate) fn metasrv(&self) -> &Arc<Metasrv> {
+        match self {
+            MockInstanceImpl::Standalone(_) => unreachable!(),
+            MockInstanceImpl::Distributed(instance) => &instance.metasrv,
+        }
+    }
 }
 
 impl MockInstance for MockInstanceImpl {
@@ -128,9 +141,17 @@ impl MockInstanceBuilder {
                 let GreptimeDbCluster {
                     guards,
                     datanode_options,
+                    mut datanode_instances,
                     ..
                 } = instance;
+                for (id, instance) in datanode_instances.iter_mut() {
+                    instance
+                        .shutdown()
+                        .await
+                        .unwrap_or_else(|_| panic!("Failed to shutdown datanode {}", id));
+                }
 
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 MockInstanceImpl::Distributed(builder.build_with(datanode_options, guards).await)
             }
         }
@@ -143,7 +164,7 @@ pub(crate) struct TestContext {
 }
 
 impl TestContext {
-    async fn new(builder: MockInstanceBuilder) -> Self {
+    pub(crate) async fn new(builder: MockInstanceBuilder) -> Self {
         let instance = builder.build().await;
 
         Self {
@@ -168,6 +189,12 @@ impl MockInstance for TestContext {
 
     fn is_distributed_mode(&self) -> bool {
         self.instance.as_ref().unwrap().is_distributed_mode()
+    }
+}
+
+impl TestContext {
+    pub(crate) fn metasrv(&self) -> &Arc<Metasrv> {
+        self.instance.as_ref().unwrap().metasrv()
     }
 }
 
@@ -384,4 +411,30 @@ pub fn find_testing_resource(path: &str) -> String {
     let p = find_workspace_path(path).display().to_string();
 
     prepare_path(&p)
+}
+
+pub async fn execute_sql(instance: &Arc<Instance>, sql: &str) -> Output {
+    execute_sql_with(instance, sql, QueryContext::arc()).await
+}
+
+pub async fn try_execute_sql(instance: &Arc<Instance>, sql: &str) -> Result<Output> {
+    try_execute_sql_with(instance, sql, QueryContext::arc()).await
+}
+
+pub async fn try_execute_sql_with(
+    instance: &Arc<Instance>,
+    sql: &str,
+    query_ctx: QueryContextRef,
+) -> Result<Output> {
+    instance.do_query(sql, query_ctx).await.remove(0)
+}
+
+pub async fn execute_sql_with(
+    instance: &Arc<Instance>,
+    sql: &str,
+    query_ctx: QueryContextRef,
+) -> Output {
+    try_execute_sql_with(instance, sql, query_ctx)
+        .await
+        .unwrap_or_else(|_| panic!("Failed to execute sql: {sql}"))
 }

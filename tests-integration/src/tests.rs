@@ -15,6 +15,7 @@
 mod instance_kafka_wal_test;
 mod instance_test;
 mod promql_test;
+mod reconciliation_test;
 pub(crate) mod test_util;
 
 use std::collections::HashMap;
@@ -42,6 +43,7 @@ impl MockDistributedInstance {
     }
 }
 
+// Creates a distributed instance for testing.
 pub async fn create_distributed_instance(test_name: &str) -> MockDistributedInstance {
     let builder = GreptimeDbClusterBuilder::new(test_name).await;
     let cluster = builder.build().await;
