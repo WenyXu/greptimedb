@@ -134,6 +134,13 @@ pub enum Error {
         source: common_meta::error::Error,
     },
 
+    #[snafu(display("Failed to submit reconcile procedure"))]
+    SubmitReconcileProcedure {
+        #[snafu(implicit)]
+        location: Location,
+        source: common_meta::error::Error,
+    },
+
     #[snafu(display("Failed to invalidate table cache"))]
     InvalidateTableCache {
         #[snafu(implicit)]
@@ -1020,7 +1027,8 @@ impl ErrorExt for Error {
             Error::NextSequence { source, .. } => source.status_code(),
             Error::DowngradeLeader { source, .. } => source.status_code(),
             Error::RegisterProcedureLoader { source, .. } => source.status_code(),
-            Error::SubmitDdlTask { source, .. } => source.status_code(),
+            Error::SubmitDdlTask { source, .. }
+            | Error::SubmitReconcileProcedure { source, .. } => source.status_code(),
             Error::ConvertProtoData { source, .. }
             | Error::TableMetadataManager { source, .. }
             | Error::RuntimeSwitchManager { source, .. }

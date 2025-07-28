@@ -15,17 +15,19 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use api::v1::meta::reconcile_request::Target;
 use api::v1::meta::{
     procedure_service_server, DdlTaskRequest as PbDdlTaskRequest,
     DdlTaskResponse as PbDdlTaskResponse, Error, MigrateRegionRequest, MigrateRegionResponse,
     ProcedureDetailRequest, ProcedureDetailResponse, ProcedureStateResponse, QueryProcedureRequest,
-    ResponseHeader,
+    ReconcileDatabase, ReconcileRequest, ReconcileResponse, ReconcileTable, ResponseHeader,
 };
 use common_meta::ddl::ExecutorContext;
 use common_meta::rpc::ddl::{DdlTask, SubmitDdlTaskRequest};
 use common_meta::rpc::procedure;
 use common_telemetry::warn;
 use snafu::{OptionExt, ResultExt};
+use table::table_reference::TableReference;
 use tonic::{Request, Response};
 
 use crate::error;
@@ -167,6 +169,54 @@ impl procedure_service_server::ProcedureService for Metasrv {
         };
 
         Ok(Response::new(resp))
+    }
+
+    async fn reconcile(&self, request: Request<ReconcileRequest>) -> GrpcResult<ReconcileResponse> {
+        if !self.is_leader() {
+            let resp = ReconcileResponse {
+                header: Some(ResponseHeader::failed(Error::is_not_leader())),
+            };
+            warn!(
+                "The current meta is not leader, but a `reconcile` request have reached the meta. Detail: {:?}.",
+                request
+            );
+            return Ok(Response::new(resp));
+        }
+
+        let ReconcileRequest { header, target } = request.into_inner();
+
+        let _header = header.context(error::MissingRequestHeaderSnafu)?;
+        let target = target.context(error::MissingRequiredParameterSnafu { param: "target" })?;
+
+        match target {
+            Target::ReconcileTable(table) => {
+                let ReconcileTable {
+                    catalog_name,
+                    schema_name,
+                    table_name,
+                } = table;
+                let table_ref = TableReference::full(&catalog_name, &schema_name, &table_name);
+                self.reconciliation_manager()
+                    .reconcile_table(table_ref)
+                    .await
+                    .context(error::SubmitReconcileProcedureSnafu)?;
+            }
+            Target::ReconcileDatabase(database) => {
+                let ReconcileDatabase {
+                    catalog_name,
+                    database_name,
+                } = database;
+                self.reconciliation_manager()
+                    .reconcile_database(catalog_name, database_name)
+                    .await
+                    .context(error::SubmitReconcileProcedureSnafu)?;
+            }
+            Target::ReconcileCatalog(_catalog) => {
+                unimplemented!()
+            }
+        }
+
+        Ok(Response::new(ReconcileResponse::default()))
     }
 
     async fn details(
