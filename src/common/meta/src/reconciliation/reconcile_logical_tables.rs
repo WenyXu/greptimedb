@@ -93,6 +93,8 @@ pub(crate) struct PersistentContext {
     // The table infos to be created.
     // The value will be set in `ResolveTableMetadatas` state.
     pub(crate) create_tables: Vec<(TableId, RawTableInfo)>,
+    // Whether the procedure is a subprocedure.
+    pub(crate) is_subprocedure: bool,
 }
 
 impl PersistentContext {
@@ -100,6 +102,7 @@ impl PersistentContext {
         table_id: TableId,
         table_name: TableName,
         logical_tables: Vec<(TableId, TableName)>,
+        is_subprocedure: bool,
     ) -> Self {
         let (logical_table_ids, logical_tables) = logical_tables.into_iter().unzip();
 
@@ -112,6 +115,7 @@ impl PersistentContext {
             physical_table_route: None,
             update_table_infos: vec![],
             create_tables: vec![],
+            is_subprocedure,
         }
     }
 }
@@ -141,8 +145,10 @@ impl ReconcileLogicalTablesProcedure {
         table_id: TableId,
         table_name: TableName,
         logical_tables: Vec<(TableId, TableName)>,
+        is_subprocedure: bool,
     ) -> Self {
-        let persistent_ctx = PersistentContext::new(table_id, table_name, logical_tables);
+        let persistent_ctx =
+            PersistentContext::new(table_id, table_name, logical_tables, is_subprocedure);
         let context = ReconcileLogicalTablesContext::new(ctx, persistent_ctx);
         let state = Box::new(ReconciliationStart);
         Self { context, state }
@@ -192,6 +198,17 @@ impl Procedure for ReconcileLogicalTablesProcedure {
 
     fn lock_key(&self) -> LockKey {
         let table_ref = &self.context.table_name().table_ref();
+
+        if self.context.persistent_ctx.is_subprocedure {
+            // The catalog and schema are already locked by the parent procedure.
+            // Only lock the table name.
+            return LockKey::new(vec![TableNameLock::new(
+                table_ref.catalog,
+                table_ref.schema,
+                table_ref.table,
+            )
+            .into()]);
+        }
 
         LockKey::new(vec![
             CatalogLock::Read(table_ref.catalog).into(),

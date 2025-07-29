@@ -161,6 +161,7 @@ impl ReconciliationManager {
             table_id,
             table_name,
             ResolveStrategy::UseLatest,
+            false,
         );
         let procedure_with_id = ProcedureWithId::with_random_id(Box::new(procedure));
         let mut watcher = self
@@ -186,6 +187,7 @@ impl ReconciliationManager {
             physical_table_id,
             physical_table_name,
             logical_tables,
+            false,
         );
         let procedure_with_id = ProcedureWithId::with_random_id(Box::new(procedure));
         let mut watcher = self
