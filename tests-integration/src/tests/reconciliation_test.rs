@@ -88,14 +88,8 @@ async fn setup_tests(frontend: &Arc<Instance>) {
     ));
 }
 
-#[tokio::test]
-async fn test_reconcile_logical_table_with_dropped_table() {
-    common_telemetry::init_default_ut_logging();
-    let builder =
-        GreptimeDbClusterBuilder::new("test_reconcile_logical_table_with_dropped_table").await;
-    let mut test_context = TestContext::new(MockInstanceBuilder::Distributed(builder)).await;
+async fn setup_reconcile_missing_logical_table(test_context: &mut TestContext) {
     setup_tests(&test_context.frontend()).await;
-
     // Mock metasrv backup.
     let dump_keyvalues = dump_kvbackend(test_context.metasrv().kv_backend()).await;
 
@@ -138,49 +132,10 @@ async fn test_reconcile_logical_table_with_dropped_table() {
     // Try query the physical table.
     let output = execute_sql(&frontend, "select * from phy order by host, job").await;
     check_output_stream(output.data, expected).await;
-
-    let metasrv = test_context.metasrv();
-    let reconciliation_manager = metasrv.reconciliation_manager();
-
-    // Try to reconcile the logical table2.
-    let table_ref = TableReference {
-        catalog: DEFAULT_CATALOG_NAME,
-        schema: DEFAULT_SCHEMA_NAME,
-        table: "t2",
-    };
-    reconciliation_manager
-        .reconcile_table(table_ref)
-        .await
-        .unwrap();
-
-    // Now, the t2 is available again.
-    let sql = r#"
-        INSERT INTO t2 (host, env, val, ts)
-        VALUES 
-            ("host4", "a", 10.3, 1667446797450),
-            ("host5", "b", 10.5, 1667446797455);"#;
-    let output = execute_sql(&frontend, sql).await;
-    assert!(matches!(output.data, OutputData::AffectedRows(2)));
-    let output = execute_sql(&frontend, "select * from t2 order by host").await;
-    let expected = r#"+-----+-------+-------------------------+------+
-| env | host  | ts                      | val  |
-+-----+-------+-------------------------+------+
-| a   | host1 | 2022-11-03T03:39:57.450 | 10.3 |
-| b   | host2 | 2022-11-03T03:39:57.455 | 10.5 |
-| c   | host3 | 2022-11-03T03:39:57.465 | 20.5 |
-| a   | host4 | 2022-11-03T03:39:57.450 | 10.3 |
-| b   | host5 | 2022-11-03T03:39:57.455 | 10.5 |
-+-----+-------+-------------------------+------+"#;
-    check_output_stream(output.data, expected).await;
 }
 
-#[tokio::test]
-async fn test_reconcile_logical_table_with_columns() {
-    common_telemetry::init_default_ut_logging();
-    let builder = GreptimeDbClusterBuilder::new("test_reconcile_logical_table_with_columns").await;
-    let mut test_context = TestContext::new(MockInstanceBuilder::Distributed(builder)).await;
+async fn setup_reconcile_missing_logical_table_columns(test_context: &mut TestContext) {
     setup_tests(&test_context.frontend()).await;
-
     // Mock metasrv backup.
     let dump_keyvalues = dump_kvbackend(test_context.metasrv().kv_backend()).await;
 
@@ -236,9 +191,64 @@ async fn test_reconcile_logical_table_with_columns() {
 | 2022-11-03T03:39:57.455 | 10.5 | host5 | 1026       | 5626344382382473396  |     | b   |
 +-------------------------+------+-------+------------+----------------------+-----+-----+"#;
     check_output_stream(output.data, expected).await;
+}
+
+#[tokio::test]
+async fn test_reconcile_dropped_logical_table() {
+    common_telemetry::init_default_ut_logging();
+    let builder = GreptimeDbClusterBuilder::new("test_reconcile_dropped_logical_table").await;
+    let mut test_context = TestContext::new(MockInstanceBuilder::Distributed(builder)).await;
+    setup_reconcile_missing_logical_table(&mut test_context).await;
+
+    let metasrv = test_context.metasrv();
+    let frontend = test_context.frontend();
+    let reconciliation_manager = metasrv.reconciliation_manager();
+
+    // Try to reconcile the logical table2.
+    let table_ref = TableReference {
+        catalog: DEFAULT_CATALOG_NAME,
+        schema: DEFAULT_SCHEMA_NAME,
+        table: "t2",
+    };
+    reconciliation_manager
+        .reconcile_table(table_ref)
+        .await
+        .unwrap();
+
+    // Now, the t2 is available again.
+    let sql = r#"
+        INSERT INTO t2 (host, env, val, ts)
+        VALUES 
+            ("host4", "a", 10.3, 1667446797450),
+            ("host5", "b", 10.5, 1667446797455);"#;
+    let output = execute_sql(&frontend, sql).await;
+    assert!(matches!(output.data, OutputData::AffectedRows(2)));
+    let output = execute_sql(&frontend, "select * from t2 order by host").await;
+    let expected = r#"+-----+-------+-------------------------+------+
+| env | host  | ts                      | val  |
++-----+-------+-------------------------+------+
+| a   | host1 | 2022-11-03T03:39:57.450 | 10.3 |
+| b   | host2 | 2022-11-03T03:39:57.455 | 10.5 |
+| c   | host3 | 2022-11-03T03:39:57.465 | 20.5 |
+| a   | host4 | 2022-11-03T03:39:57.450 | 10.3 |
+| b   | host5 | 2022-11-03T03:39:57.455 | 10.5 |
++-----+-------+-------------------------+------+"#;
+    check_output_stream(output.data, expected).await;
+}
+
+#[tokio::test]
+async fn test_reconcile_logical_table_with_missing_logical_table_columns() {
+    common_telemetry::init_default_ut_logging();
+    let builder = GreptimeDbClusterBuilder::new(
+        "test_reconcile_logical_table_with_missing_logical_table_columns",
+    )
+    .await;
+    let mut test_context = TestContext::new(MockInstanceBuilder::Distributed(builder)).await;
+    setup_reconcile_missing_logical_table_columns(&mut test_context).await;
 
     // We need to reconcile the physical table first.
     let metasrv = test_context.metasrv();
+    let frontend = test_context.frontend();
     let reconciliation_manager = metasrv.reconciliation_manager();
     let table_ref = TableReference {
         catalog: DEFAULT_CATALOG_NAME,
@@ -304,6 +314,85 @@ async fn test_reconcile_logical_table_with_columns() {
 | host2 | 2022-11-03T03:39:57.455 | b   | 10.5 |
 | host3 | 2022-11-03T03:39:57.465 | c   | 20.5 |
 +-------+-------------------------+-----+------+"#;
+    check_output_stream(output.data, expected).await;
+}
+
+#[tokio::test]
+async fn test_reconcile_database_with_dropped_logical_table() {
+    common_telemetry::init_default_ut_logging();
+    let builder =
+        GreptimeDbClusterBuilder::new("test_reconcile_database_with_dropped_logical_table").await;
+    let mut test_context = TestContext::new(MockInstanceBuilder::Distributed(builder)).await;
+    setup_reconcile_missing_logical_table(&mut test_context).await;
+
+    let metasrv = test_context.metasrv();
+    let frontend = test_context.frontend();
+    let reconciliation_manager = metasrv.reconciliation_manager();
+
+    reconciliation_manager
+        .reconcile_database(
+            DEFAULT_CATALOG_NAME.to_string(),
+            DEFAULT_SCHEMA_NAME.to_string(),
+        )
+        .await
+        .unwrap();
+
+    // Now, the t2 is available again.
+    let sql = r#"
+        INSERT INTO t2 (host, env, val, ts)
+        VALUES 
+            ("host4", "a", 10.3, 1667446797450),
+            ("host5", "b", 10.5, 1667446797455);"#;
+    let output = execute_sql(&frontend, sql).await;
+    assert!(matches!(output.data, OutputData::AffectedRows(2)));
+    let output = execute_sql(&frontend, "select * from t2 order by host").await;
+    let expected = r#"+-----+-------+-------------------------+------+
+| env | host  | ts                      | val  |
++-----+-------+-------------------------+------+
+| a   | host1 | 2022-11-03T03:39:57.450 | 10.3 |
+| b   | host2 | 2022-11-03T03:39:57.455 | 10.5 |
+| c   | host3 | 2022-11-03T03:39:57.465 | 20.5 |
+| a   | host4 | 2022-11-03T03:39:57.450 | 10.3 |
+| b   | host5 | 2022-11-03T03:39:57.455 | 10.5 |
++-----+-------+-------------------------+------+"#;
+    check_output_stream(output.data, expected).await;
+}
+
+#[tokio::test]
+async fn test_reconcile_database_with_missing_logical_table_columns() {
+    common_telemetry::init_default_ut_logging();
+    let builder =
+        GreptimeDbClusterBuilder::new("test_reconcile_database_with_missing_logical_table_columns")
+            .await;
+    let mut test_context = TestContext::new(MockInstanceBuilder::Distributed(builder)).await;
+    setup_reconcile_missing_logical_table_columns(&mut test_context).await;
+
+    let metasrv = test_context.metasrv();
+    let frontend = test_context.frontend();
+    let reconciliation_manager = metasrv.reconciliation_manager();
+    reconciliation_manager
+        .reconcile_database(
+            DEFAULT_CATALOG_NAME.to_string(),
+            DEFAULT_SCHEMA_NAME.to_string(),
+        )
+        .await
+        .unwrap();
+
+    // Try query the physical table.
+    // Now we can see `foo` column.
+    let output = execute_sql(&frontend, "select * from phy order by host, job").await;
+    let expected = r#"+-------------------------+------+-------+------------+----------------------+-----+-----+-----+
+| ts                      | val  | host  | __table_id | __tsid               | job | env | foo |
++-------------------------+------+-------+------------+----------------------+-----+-----+-----+
+| 2022-11-03T03:39:57.450 | 10.3 | host1 | 1025       | 18158861556952186298 | a   |     |     |
+| 2022-11-03T03:39:57.450 | 10.3 | host1 | 1026       | 14399158719604416468 |     | a   |     |
+| 2022-11-03T03:39:57.455 | 10.5 | host2 | 1025       | 5125207934447856269  | b   |     |     |
+| 2022-11-03T03:39:57.455 | 10.5 | host2 | 1026       | 1935387462790936013  |     | b   |     |
+| 2022-11-03T03:39:57.465 | 20.5 | host3 | 1025       | 12577166563753894792 | c   |     |     |
+| 2022-11-03T03:39:57.465 | 20.5 | host3 | 1026       | 16095285061536390213 |     | c   |     |
+| 2022-11-03T03:39:57.450 | 10.3 | host4 | 1026       | 4642016305345462226  |     | a   | g1  |
+| 2022-11-03T03:39:57.455 | 10.5 | host5 | 1026       | 5626344382382473396  |     | b   | g2  |
++-------------------------+------+-------+------------+----------------------+-----+-----+-----+"#;
     check_output_stream(output.data, expected).await;
 }
 
