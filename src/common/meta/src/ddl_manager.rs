@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use api::v1::meta::ProcedureDetailResponse;
+use api::v1::meta::{ProcedureDetailResponse, ReconcileRequest};
 use common_procedure::{
     watcher, BoxedProcedureLoader, Output, ProcedureId, ProcedureManagerRef, ProcedureWithId,
 };
@@ -65,8 +65,9 @@ use crate::rpc::ddl::{
     CreateViewTask, DropDatabaseTask, DropFlowTask, DropTableTask, DropViewTask, QueryContext,
     SubmitDdlTaskRequest, SubmitDdlTaskResponse, TruncateTableTask,
 };
-use crate::rpc::procedure;
-use crate::rpc::procedure::{MigrateRegionRequest, MigrateRegionResponse, ProcedureStateResponse};
+use crate::rpc::procedure::{
+    self, MigrateRegionRequest, MigrateRegionResponse, ProcedureStateResponse,
+};
 use crate::rpc::router::RegionRoute;
 
 pub type DdlManagerRef = Arc<DdlManager>;
@@ -901,6 +902,13 @@ impl ProcedureExecutor for DdlManager {
     ) -> Result<MigrateRegionResponse> {
         UnsupportedSnafu {
             operation: "migrate_region",
+        }
+        .fail()
+    }
+
+    async fn reconcile(&self, _ctx: &ExecutorContext, _request: ReconcileRequest) -> Result<()> {
+        UnsupportedSnafu {
+            operation: "reconcile",
         }
         .fail()
     }

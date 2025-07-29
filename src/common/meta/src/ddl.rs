@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use api::v1::meta::ProcedureDetailResponse;
+use api::v1::meta::{ProcedureDetailResponse, ReconcileRequest};
 use common_telemetry::tracing_context::W3cTrace;
 use store_api::storage::{RegionId, RegionNumber, TableId};
 
@@ -104,6 +104,9 @@ pub trait ProcedureExecutor: Send + Sync {
         ctx: &ExecutorContext,
         request: MigrateRegionRequest,
     ) -> Result<MigrateRegionResponse>;
+
+    /// Submit a reconcile task
+    async fn reconcile(&self, ctx: &ExecutorContext, request: ReconcileRequest) -> Result<()>;
 
     /// Query the procedure state by its id
     async fn query_procedure_state(

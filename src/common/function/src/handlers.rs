@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use api::v1::meta::ReconcileRequest;
 use async_trait::async_trait;
 use catalog::CatalogManagerRef;
 use common_base::AffectedRows;
@@ -64,6 +65,8 @@ pub trait TableMutationHandler: Send + Sync {
 pub trait ProcedureServiceHandler: Send + Sync {
     /// Migrate a region from source peer to target peer, returns the procedure id if success.
     async fn migrate_region(&self, request: MigrateRegionRequest) -> Result<Option<String>>;
+
+    async fn reconcile(&self, request: ReconcileRequest) -> Result<()>;
 
     /// Query the procedure' state by its id
     async fn query_procedure_state(&self, pid: &str) -> Result<ProcedureStateResponse>;
