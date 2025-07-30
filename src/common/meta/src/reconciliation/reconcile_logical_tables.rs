@@ -199,22 +199,25 @@ impl Procedure for ReconcileLogicalTablesProcedure {
     fn lock_key(&self) -> LockKey {
         let table_ref = &self.context.table_name().table_ref();
 
+        let table_names = self
+            .context
+            .persistent_ctx
+            .logical_tables
+            .iter()
+            .map(|t| TableNameLock::new(&t.catalog_name, &t.schema_name, &t.table_name).into())
+            .collect::<Vec<_>>();
         if self.context.persistent_ctx.is_subprocedure {
             // The catalog and schema are already locked by the parent procedure.
             // Only lock the table name.
-            return LockKey::new(vec![TableNameLock::new(
-                table_ref.catalog,
-                table_ref.schema,
-                table_ref.table,
-            )
-            .into()]);
+            return LockKey::new(table_names);
         }
 
-        LockKey::new(vec![
+        let mut keys = vec![
             CatalogLock::Read(table_ref.catalog).into(),
             SchemaLock::read(table_ref.catalog, table_ref.schema).into(),
-            TableNameLock::new(table_ref.catalog, table_ref.schema, table_ref.table).into(),
-        ])
+        ];
+        keys.extend(table_names);
+        LockKey::new(keys)
     }
 }
 
