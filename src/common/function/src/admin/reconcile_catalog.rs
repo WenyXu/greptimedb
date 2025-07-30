@@ -13,60 +13,34 @@
 // limitations under the License.
 
 use api::v1::meta::reconcile_request::Target;
-use api::v1::meta::{ReconcileDatabase, ReconcileRequest};
+use api::v1::meta::{ReconcileCatalog, ReconcileRequest};
 use common_macro::admin_fn;
-use common_query::error::{
-    InvalidFuncArgsSnafu, MissingProcedureServiceHandlerSnafu, Result,
-    UnsupportedInputDataTypeSnafu,
-};
+use common_query::error::{MissingProcedureServiceHandlerSnafu, Result};
 use common_query::prelude::{Signature, Volatility};
 use datatypes::prelude::*;
 use session::context::QueryContextRef;
-use snafu::ensure;
 
 use crate::handlers::ProcedureServiceHandlerRef;
 
-/// A function to reconcile a database.
+/// A function to reconcile a catalog.
 /// Returns the number of affected rows if success.
 ///
-/// - `reconcile_database(database_name)`.
-///
-/// The parameters:
-/// - `database_name`:  the database name
+/// - `reconcile_catalog()`.
 #[admin_fn(
-    name = ReconcileDatabaseFunction,
-    display_name = reconcile_database,
+    name = ReconcileCatalogFunction,
+    display_name = reconcile_catalog,
     sig_fn = signature,
     ret = uint64
 )]
-pub(crate) async fn reconcile_database(
+pub(crate) async fn reconcile_catalog(
     procedure_service_handler: &ProcedureServiceHandlerRef,
     query_ctx: &QueryContextRef,
-    params: &[ValueRef<'_>],
+    _params: &[ValueRef<'_>],
 ) -> Result<Value> {
-    ensure!(
-        params.len() == 1,
-        InvalidFuncArgsSnafu {
-            err_msg: format!(
-                "The length of the args is not correct, expect 1, have: {}",
-                params.len()
-            ),
-        }
-    );
-
-    let ValueRef::String(database_name) = params[0] else {
-        return UnsupportedInputDataTypeSnafu {
-            function: "reconcile_database",
-            datatypes: params.iter().map(|v| v.data_type()).collect::<Vec<_>>(),
-        }
-        .fail();
-    };
-
     procedure_service_handler
         .reconcile(ReconcileRequest {
-            target: Some(Target::ReconcileDatabase(ReconcileDatabase {
+            target: Some(Target::ReconcileCatalog(ReconcileCatalog {
                 catalog_name: query_ctx.current_catalog().to_string(),
-                database_name: database_name.to_string(),
             })),
             ..Default::default()
         })
@@ -76,9 +50,5 @@ pub(crate) async fn reconcile_database(
 }
 
 fn signature() -> Signature {
-    Signature::uniform(
-        1,
-        vec![ConcreteDataType::string_datatype()],
-        Volatility::Immutable,
-    )
+    Signature::nullary(Volatility::Immutable)
 }

@@ -20,7 +20,8 @@ use api::v1::meta::{
     procedure_service_server, DdlTaskRequest as PbDdlTaskRequest,
     DdlTaskResponse as PbDdlTaskResponse, Error, MigrateRegionRequest, MigrateRegionResponse,
     ProcedureDetailRequest, ProcedureDetailResponse, ProcedureStateResponse, QueryProcedureRequest,
-    ReconcileDatabase, ReconcileRequest, ReconcileResponse, ReconcileTable, ResponseHeader,
+    ReconcileCatalog, ReconcileDatabase, ReconcileRequest, ReconcileResponse, ReconcileTable,
+    ResponseHeader,
 };
 use common_meta::ddl::ExecutorContext;
 use common_meta::rpc::ddl::{DdlTask, SubmitDdlTaskRequest};
