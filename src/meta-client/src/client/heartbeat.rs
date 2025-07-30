@@ -233,6 +233,7 @@ impl Inner {
         })?;
         let receiver = ReceiverStream::new(receiver);
 
+        info!("Try to connect to metasrv leader: {}", leader_addr);
         let mut stream = leader
             .heartbeat(receiver)
             .await
