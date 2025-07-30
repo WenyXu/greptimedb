@@ -25,6 +25,7 @@ use crate::error::{self, Result, SubmitProcedureSnafu, TableNotFoundSnafu, WaitP
 use crate::key::table_name::TableNameKey;
 use crate::key::TableMetadataManagerRef;
 use crate::node_manager::NodeManagerRef;
+use crate::reconciliation::reconcile_catalog::ReconcileCatalogProcedure;
 use crate::reconciliation::reconcile_database::ReconcileDatabaseProcedure;
 use crate::reconciliation::reconcile_logical_tables::ReconcileLogicalTablesProcedure;
 use crate::reconciliation::reconcile_table::resolve_column_metadata::ResolveStrategy;
@@ -135,6 +136,28 @@ impl ReconciliationManager {
             schema,
             false,
             64,
+            ResolveStrategy::UseLatest,
+            false,
+        );
+
+        let procedure_with_id = ProcedureWithId::with_random_id(Box::new(procedure));
+        let mut watcher = self
+            .procedure_manager
+            .submit(procedure_with_id)
+            .await
+            .context(SubmitProcedureSnafu)?;
+        watcher::wait(&mut watcher)
+            .await
+            .context(WaitProcedureSnafu)?;
+
+        Ok(())
+    }
+
+    pub async fn reconcile_catalog(&self, catalog: String) -> Result<()> {
+        let procedure = ReconcileCatalogProcedure::new(
+            self.context.clone(),
+            catalog,
+            false,
             ResolveStrategy::UseLatest,
         );
 

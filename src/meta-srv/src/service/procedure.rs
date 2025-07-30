@@ -211,8 +211,12 @@ impl procedure_service_server::ProcedureService for Metasrv {
                     .await
                     .context(error::SubmitReconcileProcedureSnafu)?;
             }
-            Target::ReconcileCatalog(_catalog) => {
-                unimplemented!()
+            Target::ReconcileCatalog(catalog) => {
+                let ReconcileCatalog { catalog_name } = catalog;
+                self.reconciliation_manager()
+                    .reconcile_catalog(catalog_name)
+                    .await
+                    .context(error::SubmitReconcileProcedureSnafu)?;
             }
         }
 
