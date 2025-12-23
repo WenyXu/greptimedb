@@ -1620,6 +1620,7 @@ fn drop_lines_with_inconsistent_results(input: String) -> String {
         "enable_read_cache =",
         "max_total_body_memory =",
         "max_total_message_memory =",
+        "ignore_metadata_snapshot_restore_error ="
     ];
 
     input
