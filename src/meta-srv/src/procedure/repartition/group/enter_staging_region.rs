@@ -35,7 +35,7 @@ use crate::procedure::repartition::group::utils::{
 };
 use crate::procedure::repartition::group::{Context, GroupPrepareResult, State};
 use crate::procedure::repartition::plan::RegionDescriptor;
-use crate::procedure::utils::{self, ErrorStrategy};
+use crate::procedure::utils::{self};
 use crate::service::mailbox::{Channel, MailboxRef};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,8 +51,8 @@ impl State for EnterStagingRegion {
     ) -> Result<(Box<dyn State>, Status)> {
         {
             let timer = Instant::now();
-            self.flush_pending_deallocate_regions(ctx).await?;
-            ctx.update_flush_pending_deallocate_regions_elapsed(timer.elapsed());
+            self.downgrade_pending_deallocate_regions(ctx).await?;
+            ctx.update_downgrade_pending_deallocate_regions_elapsed(timer.elapsed());
         }
 
         {
@@ -342,7 +342,7 @@ impl EnterStagingRegion {
         Ok(())
     }
 
-    async fn flush_pending_deallocate_regions(&self, ctx: &mut Context) -> Result<()> {
+    async fn downgrade_pending_deallocate_regions(&self, ctx: &mut Context) -> Result<()> {
         let pending_deallocate_region_ids = &ctx.persistent_ctx.pending_deallocate_region_ids;
         if pending_deallocate_region_ids.is_empty() {
             return Ok(());
@@ -353,7 +353,7 @@ impl EnterStagingRegion {
         let operation_timeout =
             ctx.next_operation_timeout()
                 .context(error::ExceededDeadlineSnafu {
-                    operation: "Flush pending deallocate regions",
+                    operation: "Downgrade pending deallocate regions",
                 })?;
         let result = &ctx.persistent_ctx.group_prepare_result.as_ref().unwrap();
         let source_routes = result
@@ -364,27 +364,26 @@ impl EnterStagingRegion {
             .collect::<Vec<_>>();
         let peer_region_ids_map = group_region_routes_by_peer(&source_routes);
         info!(
-            "Flushing pending deallocate regions, table_id: {}, group_id: {}, peer_region_ids_map: {:?}",
+            "Downgrading pending deallocate regions, table_id: {}, group_id: {}, peer_region_ids_map: {:?}",
             table_id, group_id, peer_region_ids_map
         );
         let now = Instant::now();
         let tasks = peer_region_ids_map
             .iter()
             .map(|(peer, region_ids)| {
-                utils::flush_region(
+                utils::downgrade_region(
                     &ctx.mailbox,
                     &ctx.server_addr,
                     region_ids,
                     peer,
                     operation_timeout,
-                    ErrorStrategy::Retry,
                 )
             })
             .collect::<Vec<_>>();
 
         try_join_all(tasks).await?;
         info!(
-            "Flushed pending deallocate regions: {:?}, table_id: {}, group_id: {}, elapsed: {:?}",
+            "Downgraded pending deallocate regions: {:?}, table_id: {}, group_id: {}, elapsed: {:?}",
             source_routes
                 .iter()
                 .map(|route| route.region.id)

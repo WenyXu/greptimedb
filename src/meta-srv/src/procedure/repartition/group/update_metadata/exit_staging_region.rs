@@ -18,6 +18,7 @@ use common_error::ext::BoxedError;
 use common_meta::rpc::router::RegionRoute;
 use common_telemetry::{error, info};
 use snafu::{OptionExt, ResultExt};
+use store_api::storage::RegionId;
 
 use crate::error::{self, Result};
 use crate::procedure::repartition::group::update_metadata::UpdateMetadata;
@@ -30,12 +31,22 @@ impl UpdateMetadata {
         sources: &[RegionDescriptor],
         targets: &[RegionDescriptor],
         current_region_routes: &[RegionRoute],
+        pending_deallocate_region_ids: &[RegionId],
     ) -> Result<Vec<RegionRoute>> {
         let mut region_routes = current_region_routes.to_vec();
         let mut region_routes_map = region_routes
             .iter_mut()
             .map(|route| (route.region.id, route))
             .collect::<HashMap<_, _>>();
+        for region_id in pending_deallocate_region_ids {
+            let region_route = region_routes_map.get_mut(region_id).context(
+                error::RepartitionPendingDeallocateRegionMissingSnafu {
+                    group_id,
+                    region_id: *region_id,
+                },
+            )?;
+            region_route.clean_downgrading_leader();
+        }
 
         for target in targets {
             let region_route = region_routes_map.get_mut(&target.region_id).context(
@@ -78,6 +89,7 @@ impl UpdateMetadata {
             &ctx.persistent_ctx.sources,
             &ctx.persistent_ctx.targets,
             region_routes,
+            &ctx.persistent_ctx.pending_deallocate_region_ids,
         )?;
 
         let source_count = ctx.persistent_ctx.sources.len();

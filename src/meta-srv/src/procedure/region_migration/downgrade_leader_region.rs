@@ -15,14 +15,10 @@
 use std::any::Any;
 use std::time::Duration;
 
-use api::v1::meta::MailboxMessage;
 use common_error::ext::BoxedError;
 use common_meta::distributed_time_constants::default_distributed_time_constants;
-use common_meta::instruction::{
-    DowngradeRegion, DowngradeRegionReply, DowngradeRegionsReply, Instruction, InstructionReply,
-};
 use common_procedure::{Context as ProcedureContext, Status};
-use common_telemetry::{debug, error, info, warn};
+use common_telemetry::{error, info, warn};
 use common_time::util::current_time_millis;
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, ResultExt};
@@ -30,11 +26,10 @@ use tokio::time::{Instant, sleep};
 
 use crate::discovery::utils::find_datanode_lease_value;
 use crate::error::{self, Result};
-use crate::handler::HeartbeatMailbox;
 use crate::procedure::region_migration::update_metadata::UpdateMetadata;
 use crate::procedure::region_migration::upgrade_candidate_region::UpgradeCandidateRegion;
 use crate::procedure::region_migration::{Context, State};
-use crate::service::mailbox::Channel;
+use crate::procedure::utils;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DowngradeLeaderRegion {
@@ -112,84 +107,6 @@ impl State for DowngradeLeaderRegion {
 }
 
 impl DowngradeLeaderRegion {
-    /// Builds downgrade region instruction.
-    fn build_downgrade_region_instruction(
-        &self,
-        ctx: &Context,
-        flush_timeout: Duration,
-    ) -> Instruction {
-        let region_ids = &ctx.persistent_ctx.region_ids;
-        let mut downgrade_regions = Vec::with_capacity(region_ids.len());
-        for region_id in region_ids {
-            downgrade_regions.push(DowngradeRegion {
-                region_id: *region_id,
-                flush_timeout: Some(flush_timeout),
-            });
-        }
-
-        Instruction::DowngradeRegions(downgrade_regions)
-    }
-
-    fn handle_downgrade_region_reply(
-        &self,
-        ctx: &mut Context,
-        reply: &DowngradeRegionReply,
-        now: &Instant,
-    ) -> Result<()> {
-        let leader = &ctx.persistent_ctx.from_peer;
-        let DowngradeRegionReply {
-            region_id,
-            last_entry_id,
-            metadata_last_entry_id,
-            exists,
-            error,
-        } = reply;
-
-        if error.is_some() {
-            return error::RetryLaterSnafu {
-                reason: format!(
-                    "Failed to downgrade the region {} on datanode {:?}, error: {:?}, elapsed: {:?}",
-                    region_id, leader, error, now.elapsed()
-                ),
-            }
-            .fail();
-        }
-
-        if !exists {
-            warn!(
-                "Trying to downgrade the region {} on datanode {:?}, but region doesn't exist!, elapsed: {:?}",
-                region_id,
-                leader,
-                now.elapsed()
-            );
-        } else {
-            info!(
-                "Region {} leader is downgraded on datanode {:?}, last_entry_id: {:?}, metadata_last_entry_id: {:?}, elapsed: {:?}",
-                region_id,
-                leader,
-                last_entry_id,
-                metadata_last_entry_id,
-                now.elapsed()
-            );
-        }
-
-        if let Some(last_entry_id) = last_entry_id {
-            debug!(
-                "set last_entry_id: {:?}, region_id: {:?}",
-                last_entry_id, region_id
-            );
-            ctx.volatile_ctx
-                .set_last_entry_id(*region_id, *last_entry_id);
-        }
-
-        if let Some(metadata_last_entry_id) = metadata_last_entry_id {
-            ctx.volatile_ctx
-                .set_metadata_last_entry_id(*region_id, *metadata_last_entry_id);
-        }
-
-        Ok(())
-    }
-
     /// Tries to downgrade a leader region.
     ///
     /// Retry:
@@ -204,63 +121,29 @@ impl DowngradeLeaderRegion {
     /// - [ExceededDeadline](error::Error::ExceededDeadline)
     /// - Invalid JSON.
     async fn downgrade_region(&self, ctx: &mut Context) -> Result<()> {
-        let region_ids = &ctx.persistent_ctx.region_ids;
         let operation_timeout =
             ctx.next_operation_timeout()
                 .context(error::ExceededDeadlineSnafu {
-                    operation: "Downgrade region",
+                    operation: "Downgrade leader region",
                 })?;
-        let downgrade_instruction = self.build_downgrade_region_instruction(ctx, operation_timeout);
-
-        let leader = &ctx.persistent_ctx.from_peer;
-        let msg = MailboxMessage::json_message(
-            &format!("Downgrade leader regions: {:?}", region_ids),
-            &format!("Metasrv@{}", ctx.server_addr()),
-            &format!("Datanode-{}@{}", leader.id, leader.addr),
-            common_time::util::current_time_millis(),
-            &downgrade_instruction,
+        let results = utils::downgrade_region(
+            &ctx.mailbox,
+            &ctx.server_addr,
+            &ctx.persistent_ctx.region_ids,
+            &ctx.persistent_ctx.from_peer,
+            operation_timeout,
         )
-        .with_context(|_| error::SerializeToJsonSnafu {
-            input: downgrade_instruction.to_string(),
-        })?;
-
-        let ch = Channel::Datanode(leader.id);
-        let now = Instant::now();
-        let receiver = ctx.mailbox.send(&ch, msg, operation_timeout).await?;
-
-        match receiver.await {
-            Ok(msg) => {
-                let reply = HeartbeatMailbox::json_reply(&msg)?;
-                info!(
-                    "Received downgrade region reply: {:?}, region: {:?}, elapsed: {:?}",
-                    reply,
-                    region_ids,
-                    now.elapsed()
-                );
-                let InstructionReply::DowngradeRegions(DowngradeRegionsReply { replies }) = reply
-                else {
-                    return error::UnexpectedInstructionReplySnafu {
-                        mailbox_message: msg.to_string(),
-                        reason: "expect downgrade region reply",
-                    }
-                    .fail();
-                };
-
-                for reply in replies {
-                    self.handle_downgrade_region_reply(ctx, &reply, &now)?;
-                }
-                Ok(())
+        .await?;
+        for (region_id, result) in results {
+            if let Some(last_entry_id) = result.last_entry_id {
+                ctx.volatile_ctx.set_last_entry_id(region_id, last_entry_id);
             }
-            Err(error::Error::MailboxTimeout { .. }) => {
-                let reason = format!(
-                    "Mailbox received timeout for downgrade leader region {region_ids:?} on datanode {:?}, elapsed: {:?}",
-                    leader,
-                    now.elapsed()
-                );
-                error::RetryLaterSnafu { reason }.fail()
+            if let Some(metadata_last_entry_id) = result.metadata_last_entry_id {
+                ctx.volatile_ctx
+                    .set_metadata_last_entry_id(region_id, metadata_last_entry_id);
             }
-            Err(err) => Err(err),
         }
+        Ok(())
     }
 
     async fn update_leader_region_lease_deadline(&self, ctx: &mut Context) {
@@ -387,6 +270,7 @@ mod tests {
     use crate::procedure::test_util::{
         new_close_region_reply, new_downgrade_region_reply, send_mock_reply,
     };
+    use crate::service::mailbox::Channel;
 
     fn new_persistent_context() -> PersistentContext {
         PersistentContext::new(

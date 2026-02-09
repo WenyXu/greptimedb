@@ -56,8 +56,8 @@ use crate::service::mailbox::MailboxRef;
 
 #[derive(Debug, Clone, Default)]
 pub struct Metrics {
-    /// Elapsed time of flushing pending deallocate regions.
-    flush_pending_deallocate_regions_elapsed: Duration,
+    /// Elapsed time of downgrading pending deallocate regions.
+    downgrade_pending_deallocate_regions_elapsed: Duration,
     /// Elapsed time of entering staging region.
     enter_staging_region_elapsed: Duration,
     /// Elapsed time of applying staging manifest.
@@ -70,17 +70,17 @@ pub struct Metrics {
 
 impl Display for Metrics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let total = self.flush_pending_deallocate_regions_elapsed
+        let total = self.downgrade_pending_deallocate_regions_elapsed
             + self.enter_staging_region_elapsed
             + self.apply_staging_manifest_elapsed
             + self.remap_manifest_elapsed
             + self.update_metadata_elapsed;
         write!(f, "total: {:?}", total)?;
         let mut parts = Vec::with_capacity(5);
-        if self.flush_pending_deallocate_regions_elapsed > Duration::ZERO {
+        if self.downgrade_pending_deallocate_regions_elapsed > Duration::ZERO {
             parts.push(format!(
-                "flush_pending_deallocate_regions_elapsed: {:?}",
-                self.flush_pending_deallocate_regions_elapsed
+                "downgrade_pending_deallocate_regions_elapsed: {:?}",
+                self.downgrade_pending_deallocate_regions_elapsed
             ));
         }
         if self.enter_staging_region_elapsed > Duration::ZERO {
@@ -121,8 +121,9 @@ impl Metrics {
         self.enter_staging_region_elapsed += elapsed;
     }
 
-    pub fn update_flush_pending_deallocate_regions_elapsed(&mut self, elapsed: Duration) {
-        self.flush_pending_deallocate_regions_elapsed += elapsed;
+    /// Updates the elapsed time of downgrading pending deallocate regions.
+    pub fn update_downgrade_pending_deallocate_regions_elapsed(&mut self, elapsed: Duration) {
+        self.downgrade_pending_deallocate_regions_elapsed += elapsed;
     }
 
     /// Updates the elapsed time of applying staging manifest.
@@ -524,11 +525,11 @@ impl Context {
             .update_enter_staging_region_elapsed(elapsed);
     }
 
-    /// Updates the elapsed time of flushing pending deallocate regions.
-    pub fn update_flush_pending_deallocate_regions_elapsed(&mut self, elapsed: Duration) {
+    /// Updates the elapsed time of downgrading pending deallocate regions.
+    pub fn update_downgrade_pending_deallocate_regions_elapsed(&mut self, elapsed: Duration) {
         self.volatile_ctx
             .metrics
-            .update_flush_pending_deallocate_regions_elapsed(elapsed);
+            .update_downgrade_pending_deallocate_regions_elapsed(elapsed);
     }
 
     /// Updates the elapsed time of applying staging manifest.

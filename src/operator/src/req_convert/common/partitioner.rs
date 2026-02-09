@@ -42,14 +42,17 @@ impl<'a> Partitioner<'a> {
             .await
             .context(SplitInsertSnafu)?
             .into_iter()
-            .map(
-                |(region_number, (rows, partition_rule_version))| InsertRequest {
-                    region_id: RegionId::new(table_id, region_number).into(),
+            .map(|(region_number, (rows, partition_rule_version))| {
+                let region_id = RegionId::new(table_id, region_number);
+                common_telemetry::info!("region_id: {}\n, rows: {:?}", region_id, rows);
+
+                InsertRequest {
+                    region_id: region_id.into(),
                     rows: Some(rows),
                     partition_rule_version: partition_rule_version
                         .map(|value| PartitionRuleVersion { value }),
-                },
-            )
+                }
+            })
             .collect();
         Ok(requests)
     }

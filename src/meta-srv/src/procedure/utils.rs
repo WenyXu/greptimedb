@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use api::v1::meta::MailboxMessage;
-use common_meta::instruction::{FlushErrorStrategy, FlushRegions, Instruction, InstructionReply};
+use common_meta::instruction::{
+    DowngradeRegion, DowngradeRegionReply, DowngradeRegionsReply, FlushErrorStrategy, FlushRegions,
+    Instruction, InstructionReply,
+};
 use common_meta::peer::Peer;
 use common_telemetry::{info, warn};
 use snafu::ResultExt;
@@ -189,6 +193,147 @@ pub(crate) async fn flush_region(
         .fail(),
         Err(err) => Err(err),
     }
+}
+
+/// Tries to downgrade a leader region.
+///
+/// Retry:
+/// - [MailboxTimeout](error::Error::MailboxTimeout), Timeout.
+/// - Failed to downgrade region on the Datanode.
+///
+/// Abort:
+/// - [PusherNotFound](error::Error::PusherNotFound), The datanode is unreachable.
+/// - [PushMessage](error::Error::PushMessage), The receiver is dropped.
+/// - [MailboxReceiver](error::Error::MailboxReceiver), The sender is dropped without sending (impossible).
+/// - [UnexpectedInstructionReply](error::Error::UnexpectedInstructionReply).
+/// - [ExceededDeadline](error::Error::ExceededDeadline)
+/// - Invalid JSON.
+pub(crate) async fn downgrade_region(
+    mailbox: &MailboxRef,
+    server_addr: &str,
+    region_ids: &[RegionId],
+    datanode: &Peer,
+    timeout: Duration,
+) -> Result<HashMap<RegionId, DowngradeRegionResult>> {
+    let region_ids = &region_ids;
+    let downgrade_regions = region_ids
+        .iter()
+        .map(|region_id| DowngradeRegion {
+            region_id: *region_id,
+            flush_timeout: Some(timeout),
+        })
+        .collect::<Vec<DowngradeRegion>>();
+    let downgrade_instruction = Instruction::DowngradeRegions(downgrade_regions);
+
+    let leader = &datanode;
+    let msg = MailboxMessage::json_message(
+        &format!("Downgrade leader regions: {:?}", region_ids),
+        &format!("Metasrv@{}", server_addr),
+        &format!("Datanode-{}@{}", leader.id, leader.addr),
+        common_time::util::current_time_millis(),
+        &downgrade_instruction,
+    )
+    .with_context(|_| error::SerializeToJsonSnafu {
+        input: downgrade_instruction.to_string(),
+    })?;
+
+    let ch = Channel::Datanode(leader.id);
+    let now = Instant::now();
+    let receiver = mailbox.send(&ch, msg, timeout).await?;
+
+    match receiver.await {
+        Ok(msg) => {
+            let reply = HeartbeatMailbox::json_reply(&msg)?;
+            info!(
+                "Received downgrade region reply: {:?}, region: {:?}, elapsed: {:?}",
+                reply,
+                region_ids,
+                now.elapsed()
+            );
+            let results = handle_downgrade_region_reply(&reply, &msg, datanode, &now)?;
+            Ok(results)
+        }
+        Err(error::Error::MailboxTimeout { .. }) => {
+            let reason = format!(
+                "Mailbox received timeout for downgrade leader region {region_ids:?} on datanode {:?}, elapsed: {:?}",
+                leader,
+                now.elapsed()
+            );
+            error::RetryLaterSnafu { reason }.fail()
+        }
+        Err(err) => Err(err),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DowngradeRegionResult {
+    pub(crate) last_entry_id: Option<u64>,
+    pub(crate) metadata_last_entry_id: Option<u64>,
+}
+
+fn handle_downgrade_region_reply(
+    reply: &InstructionReply,
+    msg: &MailboxMessage,
+    datanode: &Peer,
+    now: &Instant,
+) -> Result<HashMap<RegionId, DowngradeRegionResult>> {
+    let InstructionReply::DowngradeRegions(DowngradeRegionsReply { replies }) = reply else {
+        return error::UnexpectedInstructionReplySnafu {
+            mailbox_message: msg.to_string(),
+            reason: "expect downgrade region reply",
+        }
+        .fail();
+    };
+
+    let mut results = HashMap::with_capacity(replies.len());
+
+    for reply in replies {
+        let DowngradeRegionReply {
+            region_id,
+            last_entry_id,
+            metadata_last_entry_id,
+            exists,
+            error,
+        } = reply;
+
+        if error.is_some() {
+            return error::RetryLaterSnafu {
+                reason: format!(
+                    "Failed to downgrade the region {} on datanode {:?}, error: {:?}, elapsed: {:?}",
+                    region_id, datanode, error, now.elapsed()
+                ),
+            }
+            .fail();
+        }
+
+        if !exists {
+            warn!(
+                "Trying to downgrade the region {} on datanode {:?}, but region doesn't exist!, elapsed: {:?}",
+                region_id,
+                datanode,
+                now.elapsed()
+            );
+        } else {
+            info!(
+                "Region {} leader is downgraded on datanode {:?}, last_entry_id: {:?}, metadata_last_entry_id: {:?}, elapsed: {:?}",
+                region_id,
+                datanode,
+                last_entry_id,
+                metadata_last_entry_id,
+                now.elapsed()
+            );
+        }
+
+        results.insert(
+            *region_id,
+            DowngradeRegionResult {
+                last_entry_id: *last_entry_id,
+                metadata_last_entry_id: *metadata_last_entry_id,
+            },
+        );
+    }
+
+    Ok(results)
 }
 
 #[cfg(any(test, feature = "mock"))]

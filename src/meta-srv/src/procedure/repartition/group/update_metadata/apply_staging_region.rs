@@ -18,6 +18,7 @@ use common_error::ext::BoxedError;
 use common_meta::rpc::router::RegionRoute;
 use common_telemetry::{error, info};
 use snafu::{OptionExt, ResultExt};
+use store_api::storage::RegionId;
 
 use crate::error::{self, Result};
 use crate::procedure::repartition::group::update_metadata::UpdateMetadata;
@@ -35,12 +36,24 @@ impl UpdateMetadata {
         sources: &[RegionDescriptor],
         targets: &[RegionDescriptor],
         current_region_routes: &[RegionRoute],
+        pending_deallocate_region_ids: &[RegionId],
     ) -> Result<Vec<RegionRoute>> {
+        let _ = pending_deallocate_region_ids;
         let mut region_routes = current_region_routes.to_vec();
         let mut region_routes_map = region_routes
             .iter_mut()
             .map(|route| (route.region.id, route))
             .collect::<HashMap<_, _>>();
+
+        for region_id in pending_deallocate_region_ids {
+            let region_route = region_routes_map.get_mut(region_id).context(
+                error::RepartitionPendingDeallocateRegionMissingSnafu {
+                    group_id,
+                    region_id: *region_id,
+                },
+            )?;
+            region_route.set_leader_staging();
+        }
 
         for target in targets {
             let region_route = region_routes_map.get_mut(&target.region_id).context(
@@ -82,11 +95,13 @@ impl UpdateMetadata {
         let group_id = ctx.persistent_ctx.group_id;
         let current_table_route_value = ctx.get_table_route_value().await?;
         let region_routes = region_routes(table_id, current_table_route_value.get_inner_ref())?;
+        let pending_deallocate_region_ids = &ctx.persistent_ctx.pending_deallocate_region_ids;
         let new_region_routes = Self::apply_staging_region_routes(
             group_id,
             &ctx.persistent_ctx.sources,
             &ctx.persistent_ctx.targets,
             region_routes,
+            pending_deallocate_region_ids,
         )?;
 
         let source_count = ctx.persistent_ctx.sources.len();
@@ -170,6 +185,7 @@ mod tests {
             &[source_region],
             &[target_region],
             &region_routes,
+            &[],
         )
         .unwrap();
         assert!(new_region_routes[0].is_leader_staging());

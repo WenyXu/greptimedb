@@ -126,7 +126,7 @@ impl DeallocateRegion {
         let executor = DropTableExecutor::new(table, table_id, false);
         // Note: Consider adding an option to forcefully drop the physical region,
         // which would involve dropping all logical regions associated with that physical region.
-        executor
+        let result = executor
             .on_drop_regions(
                 node_manager,
                 leader_region_registry,
@@ -135,10 +135,24 @@ impl DeallocateRegion {
                 true,
                 true,
             )
-            .await
-            .context(error::DeallocateRegionsSnafu { table_id })?;
+            .await;
 
-        Ok(())
+        match result {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                if err.is_retry_later() {
+                    return error::RetryLaterSnafu {
+                        reason: format!(
+                            "Failed to deallocate regions for table: {}, error: {:?}",
+                            table_id, err
+                        ),
+                    }
+                    .fail();
+                }
+
+                Err(err).context(error::DeallocateRegionsSnafu { table_id })
+            }
+        }
     }
 
     fn filter_deallocatable_region_routes(

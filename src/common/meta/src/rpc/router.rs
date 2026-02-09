@@ -335,6 +335,14 @@ impl RegionRoute {
         }
     }
 
+    /// Cleans the downgrading leader state.
+    pub fn clean_downgrading_leader(&mut self) {
+        if self.leader_state == Some(LeaderState::Downgrading) {
+            self.leader_down_since = None;
+            self.leader_state = None;
+        }
+    }
+
     /// Returns how long since the leader is in `Downgraded` state.
     pub fn leader_down_millis(&self) -> Option<i64> {
         self.leader_down_since

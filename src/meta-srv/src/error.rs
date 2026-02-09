@@ -1038,6 +1038,18 @@ pub enum Error {
         location: Location,
     },
 
+    #[snafu(display(
+        "Repartition group {} pending deallocate region missing, region id: {}",
+        group_id,
+        region_id
+    ))]
+    RepartitionPendingDeallocateRegionMissing {
+        group_id: Uuid,
+        region_id: RegionId,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
     #[snafu(display("Failed to serialize partition expression"))]
     SerializePartitionExpr {
         #[snafu(source)]
@@ -1203,6 +1215,7 @@ impl ErrorExt for Error {
             | Error::LeaderPeerChanged { .. }
             | Error::RepartitionSourceRegionMissing { .. }
             | Error::RepartitionTargetRegionMissing { .. }
+            | Error::RepartitionPendingDeallocateRegionMissing { .. }
             | Error::PartitionExprMismatch { .. }
             | Error::RepartitionSourceExprMismatch { .. }
             | Error::EmptyPartitionExpr { .. } => StatusCode::InvalidArguments,

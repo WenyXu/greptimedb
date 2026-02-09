@@ -198,6 +198,19 @@ impl VersionControl {
         version_data.version = new_version;
     }
 
+    pub(crate) fn alter_partition_rule(&self, metadata: RegionMetadataRef) {
+        let version = self.current().version;
+        assert_eq!(version.metadata.column_metadatas, metadata.column_metadatas);
+        let new_version = Arc::new(
+            VersionBuilder::from_version(version)
+                .metadata(metadata)
+                .build(),
+        );
+
+        let mut version_data = self.data.write().unwrap();
+        version_data.version = new_version;
+    }
+
     /// Alter schema and format of the region.
     ///
     /// It replaces existing mutable memtable with a memtable that uses the
