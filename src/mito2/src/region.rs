@@ -97,6 +97,217 @@ pub enum RegionLeaderState {
     Downgrading,
 }
 
+/// Complete runtime state of a leader region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderState {
+    /// Current phase of the leader.
+    pub phase: LeaderPhase,
+    /// Operation behavior of the leader.
+    pub behavior: LeaderBehavior,
+}
+
+/// Current phase of a leader region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeaderPhase {
+    /// The leader is opened and is writable.
+    Writable,
+    /// The leader is in staging mode.
+    Staging,
+    /// The leader is entering staging mode.
+    EnteringStaging,
+    /// The leader is altering.
+    Altering,
+    /// The leader is handling a region edit.
+    Editing,
+    /// The leader is truncating.
+    Truncating,
+    /// The leader is dropping.
+    Dropping,
+    /// The leader is stepping down.
+    Downgrading,
+}
+
+/// Operation behavior of a leader region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderBehavior {
+    /// Behavior when receiving write requests.
+    pub write: WriteBehavior,
+    /// Whether flush is allowed.
+    pub flush: bool,
+    /// Behavior when updating manifest.
+    pub manifest_update: ManifestUpdateBehavior,
+    /// Whether compaction is allowed to update manifest.
+    pub compaction_manifest_update: bool,
+    /// Whether new compaction tasks are allowed to be scheduled.
+    pub schedule_compaction: bool,
+    /// Whether cache preload is allowed.
+    pub preload_cache: bool,
+}
+
+/// Write request behavior of a leader region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteBehavior {
+    /// Accept the write request.
+    Accept,
+    /// Stall the write request until the transient state exits.
+    Stall,
+    /// Reject the write request immediately.
+    Reject,
+}
+
+/// Manifest update behavior of a leader region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManifestUpdateBehavior {
+    /// Deny manifest update.
+    Deny,
+    /// Allow manifest update only when the current phase matches the expected phase.
+    ExpectedPhase,
+    /// Allow in-flight manifest update during downgrading.
+    InflightDuringDowngrade,
+}
+
+impl LeaderState {
+    /// Creates a writable leader state.
+    pub fn writable() -> Self {
+        Self {
+            phase: LeaderPhase::Writable,
+            behavior: LeaderBehavior {
+                write: WriteBehavior::Accept,
+                flush: true,
+                manifest_update: ManifestUpdateBehavior::ExpectedPhase,
+                compaction_manifest_update: true,
+                schedule_compaction: true,
+                preload_cache: true,
+            },
+        }
+    }
+
+    /// Creates a staging leader state.
+    pub fn staging() -> Self {
+        Self {
+            phase: LeaderPhase::Staging,
+            behavior: LeaderBehavior {
+                write: WriteBehavior::Accept,
+                flush: true,
+                manifest_update: ManifestUpdateBehavior::ExpectedPhase,
+                compaction_manifest_update: false,
+                schedule_compaction: false,
+                preload_cache: true,
+            },
+        }
+    }
+
+    /// Creates an entering-staging leader state.
+    pub fn entering_staging() -> Self {
+        Self {
+            phase: LeaderPhase::EnteringStaging,
+            behavior: LeaderBehavior {
+                write: WriteBehavior::Stall,
+                flush: false,
+                manifest_update: ManifestUpdateBehavior::ExpectedPhase,
+                compaction_manifest_update: false,
+                schedule_compaction: false,
+                preload_cache: true,
+            },
+        }
+    }
+
+    /// Creates an altering leader state.
+    pub fn altering() -> Self {
+        Self {
+            phase: LeaderPhase::Altering,
+            behavior: LeaderBehavior {
+                write: WriteBehavior::Stall,
+                flush: false,
+                manifest_update: ManifestUpdateBehavior::ExpectedPhase,
+                compaction_manifest_update: false,
+                schedule_compaction: true,
+                preload_cache: true,
+            },
+        }
+    }
+
+    /// Creates an editing leader state.
+    pub fn editing() -> Self {
+        Self {
+            phase: LeaderPhase::Editing,
+            behavior: LeaderBehavior {
+                write: WriteBehavior::Stall,
+                flush: false,
+                manifest_update: ManifestUpdateBehavior::ExpectedPhase,
+                compaction_manifest_update: true,
+                schedule_compaction: true,
+                preload_cache: true,
+            },
+        }
+    }
+
+    /// Creates a truncating leader state.
+    pub fn truncating() -> Self {
+        Self {
+            phase: LeaderPhase::Truncating,
+            behavior: LeaderBehavior {
+                write: WriteBehavior::Reject,
+                flush: false,
+                manifest_update: ManifestUpdateBehavior::ExpectedPhase,
+                compaction_manifest_update: false,
+                schedule_compaction: true,
+                preload_cache: false,
+            },
+        }
+    }
+
+    /// Creates a dropping leader state.
+    pub fn dropping() -> Self {
+        Self {
+            phase: LeaderPhase::Dropping,
+            behavior: LeaderBehavior {
+                write: WriteBehavior::Reject,
+                flush: false,
+                manifest_update: ManifestUpdateBehavior::Deny,
+                compaction_manifest_update: false,
+                schedule_compaction: true,
+                preload_cache: false,
+            },
+        }
+    }
+
+    /// Creates a downgrading leader state.
+    pub fn downgrading() -> Self {
+        Self {
+            phase: LeaderPhase::Downgrading,
+            behavior: LeaderBehavior {
+                write: WriteBehavior::Reject,
+                flush: true,
+                manifest_update: ManifestUpdateBehavior::InflightDuringDowngrade,
+                compaction_manifest_update: true,
+                schedule_compaction: true,
+                preload_cache: false,
+            },
+        }
+    }
+}
+
+impl RegionLeaderState {
+    /// Converts the current leader state into the new leader state model.
+    ///
+    /// This is a temporary compatibility bridge for the staged refactor. The
+    /// final model should store [`LeaderState`] directly instead of converting
+    /// from [`RegionLeaderState`].
+    pub fn to_leader_state_for_compat(self) -> LeaderState {
+        match self {
+            RegionLeaderState::Writable => LeaderState::writable(),
+            RegionLeaderState::Staging => LeaderState::staging(),
+            RegionLeaderState::EnteringStaging => LeaderState::entering_staging(),
+            RegionLeaderState::Altering => LeaderState::altering(),
+            RegionLeaderState::Dropping => LeaderState::dropping(),
+            RegionLeaderState::Truncating => LeaderState::truncating(),
+            RegionLeaderState::Editing => LeaderState::editing(),
+            RegionLeaderState::Downgrading => LeaderState::downgrading(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegionRoleState {
     Leader(RegionLeaderState),
@@ -1623,7 +1834,8 @@ mod tests {
     };
     use crate::manifest::manager::{RegionManifestManager, RegionManifestOptions};
     use crate::region::{
-        ManifestContext, ManifestStats, MitoRegion, RegionLeaderState, RegionRoleState,
+        LeaderPhase, LeaderState, ManifestContext, ManifestStats, ManifestUpdateBehavior,
+        MitoRegion, RegionLeaderState, RegionRoleState, WriteBehavior,
     };
     use crate::sst::FormatType;
     use crate::sst::index::intermediate::IntermediateManager;
@@ -1863,6 +2075,139 @@ mod tests {
 
         let result = region.exit_staging_on_success(&mut manager).await;
         assert!(matches!(result, Err(Error::Unexpected { .. })));
+    }
+
+    #[test]
+    fn test_region_leader_state_to_leader_state_for_compat() {
+        let cases = [
+            (RegionLeaderState::Writable, LeaderState::writable()),
+            (RegionLeaderState::Staging, LeaderState::staging()),
+            (
+                RegionLeaderState::EnteringStaging,
+                LeaderState::entering_staging(),
+            ),
+            (RegionLeaderState::Altering, LeaderState::altering()),
+            (RegionLeaderState::Dropping, LeaderState::dropping()),
+            (RegionLeaderState::Truncating, LeaderState::truncating()),
+            (RegionLeaderState::Editing, LeaderState::editing()),
+            (RegionLeaderState::Downgrading, LeaderState::downgrading()),
+        ];
+
+        for (old_state, leader_state) in cases {
+            assert_eq!(old_state.to_leader_state_for_compat(), leader_state);
+        }
+    }
+
+    #[test]
+    fn test_leader_state_behavior_for_compat() {
+        let cases = [
+            (
+                LeaderState::writable(),
+                LeaderPhase::Writable,
+                WriteBehavior::Accept,
+                true,
+                ManifestUpdateBehavior::ExpectedPhase,
+                true,
+                true,
+                true,
+            ),
+            (
+                LeaderState::staging(),
+                LeaderPhase::Staging,
+                WriteBehavior::Accept,
+                true,
+                ManifestUpdateBehavior::ExpectedPhase,
+                false,
+                false,
+                true,
+            ),
+            (
+                LeaderState::entering_staging(),
+                LeaderPhase::EnteringStaging,
+                WriteBehavior::Stall,
+                false,
+                ManifestUpdateBehavior::ExpectedPhase,
+                false,
+                false,
+                true,
+            ),
+            (
+                LeaderState::altering(),
+                LeaderPhase::Altering,
+                WriteBehavior::Stall,
+                false,
+                ManifestUpdateBehavior::ExpectedPhase,
+                false,
+                true,
+                true,
+            ),
+            (
+                LeaderState::editing(),
+                LeaderPhase::Editing,
+                WriteBehavior::Stall,
+                false,
+                ManifestUpdateBehavior::ExpectedPhase,
+                true,
+                true,
+                true,
+            ),
+            (
+                LeaderState::truncating(),
+                LeaderPhase::Truncating,
+                WriteBehavior::Reject,
+                false,
+                ManifestUpdateBehavior::ExpectedPhase,
+                false,
+                true,
+                false,
+            ),
+            (
+                LeaderState::dropping(),
+                LeaderPhase::Dropping,
+                WriteBehavior::Reject,
+                false,
+                ManifestUpdateBehavior::Deny,
+                false,
+                true,
+                false,
+            ),
+            (
+                LeaderState::downgrading(),
+                LeaderPhase::Downgrading,
+                WriteBehavior::Reject,
+                true,
+                ManifestUpdateBehavior::InflightDuringDowngrade,
+                true,
+                true,
+                false,
+            ),
+        ];
+
+        for (
+            leader_state,
+            phase,
+            write,
+            flush,
+            manifest_update,
+            compaction_manifest_update,
+            schedule_compaction,
+            preload_cache,
+        ) in cases
+        {
+            assert_eq!(leader_state.phase, phase);
+            assert_eq!(leader_state.behavior.write, write);
+            assert_eq!(leader_state.behavior.flush, flush);
+            assert_eq!(leader_state.behavior.manifest_update, manifest_update);
+            assert_eq!(
+                leader_state.behavior.compaction_manifest_update,
+                compaction_manifest_update
+            );
+            assert_eq!(
+                leader_state.behavior.schedule_compaction,
+                schedule_compaction
+            );
+            assert_eq!(leader_state.behavior.preload_cache, preload_cache);
+        }
     }
 
     #[tokio::test]
