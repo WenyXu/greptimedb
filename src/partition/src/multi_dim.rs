@@ -87,6 +87,8 @@ impl MultiDimPartitionRule {
             physical_expr_cache: RwLock::new(None),
         };
 
+        rule.ensure_expr_columns_in_partition_columns()?;
+
         if check_exprs {
             let checker = PartitionChecker::try_new(&rule)?;
             checker.check()?;
@@ -97,6 +99,30 @@ impl MultiDimPartitionRule {
 
     pub fn exprs(&self) -> &[PartitionExpr] {
         &self.exprs
+    }
+
+    fn ensure_expr_columns_in_partition_columns(&self) -> Result<()> {
+        for expr in &self.exprs {
+            self.ensure_expr_column_in_partition_columns(expr)?;
+        }
+        Ok(())
+    }
+
+    fn ensure_expr_column_in_partition_columns(&self, expr: &PartitionExpr) -> Result<()> {
+        self.ensure_operand_column_in_partition_columns(&expr.lhs)?;
+        self.ensure_operand_column_in_partition_columns(&expr.rhs)
+    }
+
+    fn ensure_operand_column_in_partition_columns(&self, operand: &Operand) -> Result<()> {
+        match operand {
+            Operand::Column(name) => ensure!(
+                self.name_to_index.contains_key(name),
+                UndefinedColumnSnafu { column: name }
+            ),
+            Operand::Expr(expr) => self.ensure_expr_column_in_partition_columns(expr)?,
+            Operand::Value(_) => {}
+        }
+        Ok(())
     }
 
     fn find_region(&self, values: &[Value]) -> Result<RegionNumber> {
@@ -414,6 +440,25 @@ mod tests {
         assert_matches!(rule.find_region(&["hzz".into()]), Ok(2));
         assert_matches!(rule.find_region(&["sh".into()]), Ok(3));
         assert_matches!(rule.find_region(&["zzzz".into()]), Ok(3));
+    }
+
+    #[test]
+    fn invalid_expr_with_non_partition_column() {
+        let rule = MultiDimPartitionRule::try_new(
+            vec!["a".to_string()],
+            vec![1],
+            vec![
+                col("a")
+                    .lt(Value::Int64(10))
+                    .and(col("b").gt_eq(Value::Int64(20))),
+            ],
+            true,
+        );
+
+        assert_matches!(
+            rule.unwrap_err(),
+            Error::UndefinedColumn { column, .. } if column == "b"
+        );
     }
 
     #[test]
