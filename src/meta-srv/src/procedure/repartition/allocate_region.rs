@@ -23,6 +23,7 @@ use common_meta::lock_key::TableLock;
 use common_meta::node_manager::NodeManagerRef;
 use common_meta::peer::PeerAllocContext;
 use common_meta::rpc::router::RegionRoute;
+use common_meta::wal_provider::RegionWalOptions;
 use common_procedure::{Context as ProcedureContext, Status};
 use common_telemetry::{debug, info};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -365,7 +366,7 @@ impl AllocateRegion {
         node_manager: &NodeManagerRef,
         raw_table_info: &TableInfo,
         region_routes: &[RegionRoute],
-        wal_options: &HashMap<RegionNumber, String>,
+        wal_options: &RegionWalOptions,
     ) -> Result<()> {
         let table_ref = TableReference::full(
             &raw_table_info.catalog_name,
@@ -401,7 +402,6 @@ impl AllocateRegion {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::sync::Arc;
 
     use common_meta::key::TableMetadataManagerRef;
@@ -496,7 +496,7 @@ mod tests {
         table_metadata_manager: TableMetadataManagerRef,
         table_id: TableId,
         concurrent_region_route: RegionRoute,
-        region_wal_options: HashMap<RegionNumber, String>,
+        region_wal_options: RegionWalOptions,
     }
 
     #[async_trait::async_trait]
