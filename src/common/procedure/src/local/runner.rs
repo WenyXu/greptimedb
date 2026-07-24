@@ -260,13 +260,15 @@ impl Runner {
 
                         self.wait_on_err(d, retry_times).await;
                     } else {
-                        self.meta
-                            .set_state(ProcedureState::prepare_rollback(Arc::new(
-                                Error::RetryTimesExceeded {
-                                    source: error.clone(),
-                                    procedure_id: self.meta.id,
-                                },
-                            )));
+                        let error = Arc::new(Error::RetryTimesExceeded {
+                            source: error.clone(),
+                            procedure_id: self.meta.id,
+                        });
+                        if self.procedure.rollback_supported() {
+                            self.set_state_and_record(ProcedureState::prepare_rollback(error));
+                        } else {
+                            self.set_state_and_record(ProcedureState::failed(error));
+                        }
                     }
                 }
                 ProcedureState::PrepareRollback { error }
@@ -464,8 +466,9 @@ impl Runner {
                         }
 
                         if self.procedure.rollback_supported() {
-                            self.meta
-                                .set_state(ProcedureState::prepare_rollback(Arc::new(e)));
+                            self.set_state_and_record(ProcedureState::prepare_rollback(Arc::new(
+                                e,
+                            )));
                         } else {
                             self.set_state_and_record(ProcedureState::failed(Arc::new(e)));
                         }
@@ -603,7 +606,7 @@ impl Runner {
                     StatusCode::Internal,
                 )));
                 if self.procedure.rollback_supported() {
-                    self.meta.set_state(ProcedureState::prepare_rollback(err));
+                    self.set_state_and_record(ProcedureState::prepare_rollback(err));
                 } else {
                     self.set_state_and_record(ProcedureState::failed(err));
                 }
@@ -754,7 +757,8 @@ impl Runner {
             ProcedureState::Done { .. } => Some(EventTrigger::Succeeded),
             ProcedureState::Failed { .. } => Some(EventTrigger::Failed),
             ProcedureState::Poisoned { .. } => Some(EventTrigger::Poisoned),
-            _ => None,
+            ProcedureState::Running => None,
+            ProcedureState::PrepareRollback { .. } => Some(EventTrigger::PrepareRollback),
         };
         self.meta.set_state(state);
         if let Some(trigger) = trigger {
@@ -801,6 +805,7 @@ mod tests {
     use common_error::ext::{ErrorExt, PlainError};
     use common_error::mock::MockError;
     use common_error::status_code::StatusCode;
+    use common_event_recorder::Event;
     use common_test_util::temp_dir::create_temp_dir;
     use futures::future::join_all;
     use futures_util::FutureExt;
@@ -813,8 +818,10 @@ mod tests {
     use crate::local::{DynamicKeyLockGuard, test_util};
     use crate::procedure::PoisonKeys;
     use crate::store::proc_path;
-    use crate::test_util::InMemoryPoisonStore;
-    use crate::{ContextProvider, Error, LockKey, PoisonKey, Procedure};
+    use crate::test_util::{CapturingEventRecorder, InMemoryPoisonStore, TestProcedureEvent};
+    use crate::{
+        ContextProvider, Error, EventContext, EventTrigger, LockKey, PoisonKey, Procedure,
+    };
 
     const ROOT_ID: &str = "9f805a1f-05f7-490c-9f91-bd56e3cc54c1";
 
@@ -960,6 +967,10 @@ mod tests {
 
         fn poison_keys(&self) -> PoisonKeys {
             self.poison_keys.clone()
+        }
+
+        fn event(&self, _ctx: &EventContext<'_>) -> Option<Box<dyn Event>> {
+            Some(Box::new(TestProcedureEvent))
         }
     }
 
@@ -1985,6 +1996,8 @@ mod tests {
         let object_store = test_util::new_object_store(&dir);
         let procedure_store = Arc::new(ProcedureStore::from_object_store(object_store.clone()));
         let mut runner = new_runner(meta.clone(), Box::new(poison), procedure_store);
+        let event_recorder = Arc::new(CapturingEventRecorder::default());
+        runner.event_recorder = Some(event_recorder.clone());
         runner.manager_ctx.start();
         runner.exponential_builder = ExponentialBuilder::default()
             .with_min_delay(Duration::from_millis(1))
@@ -2005,6 +2018,12 @@ mod tests {
         runner.execute_once_with_retry(&ctx).await;
         let err = meta.state().error().unwrap().clone();
         assert_matches!(&*err, Error::RetryTimesExceeded { .. });
+        assert!(event_recorder.triggers().contains(&EventTrigger::Failed));
+        assert!(
+            !event_recorder
+                .triggers()
+                .contains(&EventTrigger::PrepareRollback)
+        );
 
         // Check the poison is deleted.
         let procedure_id = runner
@@ -2256,6 +2275,8 @@ mod tests {
         let object_store = test_util::new_object_store(&dir);
         let procedure_store = Arc::new(ProcedureStore::from_object_store(object_store.clone()));
         let mut runner = new_runner(meta.clone(), Box::new(parent), procedure_store);
+        let event_recorder = Arc::new(CapturingEventRecorder::default());
+        runner.event_recorder = Some(event_recorder.clone());
         runner.manager_ctx.start();
 
         runner.execute_once(&ctx).await;
@@ -2271,6 +2292,10 @@ mod tests {
             }
             _ => panic!("Expected PrepareRollback, got {state:?}"),
         }
+        assert_eq!(
+            event_recorder.triggers(),
+            vec![EventTrigger::PrepareRollback]
+        );
         // Child should NOT have been submitted
         assert!(
             !runner.manager_ctx.contains_procedure(child_id),

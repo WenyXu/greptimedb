@@ -273,6 +273,8 @@ pub enum EventTrigger {
         /// Retry attempt within the current runner lifecycle.
         attempt: u32,
     },
+    /// Procedure rollback has been selected because execution cannot continue.
+    PrepareRollback,
     /// Procedure rollback is starting.
     RollingBack,
     /// The procedure reached a successful terminal state.
@@ -314,6 +316,7 @@ impl Display for EventTrigger {
                 "ChildSubmitted(procedure_id={procedure_id}, outcome={outcome})"
             ),
             Self::Retrying { phase, attempt } => write!(f, "Retrying({phase}, {attempt})"),
+            Self::PrepareRollback => write!(f, "PrepareRollback"),
             Self::RollingBack => write!(f, "RollingBack"),
             Self::Succeeded => write!(f, "Succeeded"),
             Self::Failed => write!(f, "Failed"),

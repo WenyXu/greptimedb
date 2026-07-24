@@ -228,6 +228,7 @@ mod tests {
             .to_string(),
             "Retrying(Execute, 2)"
         );
+        assert_eq!(EventTrigger::PrepareRollback.to_string(), "PrepareRollback");
         assert_eq!(EventTrigger::RollingBack.to_string(), "RollingBack");
     }
 }

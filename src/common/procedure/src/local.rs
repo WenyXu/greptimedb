@@ -996,12 +996,11 @@ pub(crate) mod test_util {
 #[cfg(test)]
 mod tests {
     use std::assert_matches;
-    use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 
     use common_error::mock::MockError;
     use common_error::status_code::StatusCode;
-    use common_event_recorder::{Event, EventRecorder};
+    use common_event_recorder::Event;
     use common_test_util::temp_dir::create_temp_dir;
     use tokio::sync::oneshot;
     use tokio::time::timeout;
@@ -1009,56 +1008,12 @@ mod tests {
     use super::*;
     use crate::error::{self, Error};
     use crate::store::state_store::ObjectStateStore;
-    use crate::test_util::InMemoryPoisonStore;
-    use crate::{Context, EventContext, EventTrigger, Procedure, ProcedureEvent, Status};
+    use crate::test_util::{CapturingEventRecorder, InMemoryPoisonStore, TestProcedureEvent};
+    use crate::{Context, EventContext, EventTrigger, Procedure, Status};
 
     fn new_test_manager_context() -> ManagerContext {
         let poison_manager = Arc::new(InMemoryPoisonStore::default());
         ManagerContext::new(poison_manager)
-    }
-
-    #[derive(Debug, Default)]
-    struct CapturingEventRecorder {
-        events: Mutex<Vec<Box<dyn Event>>>,
-    }
-
-    impl CapturingEventRecorder {
-        fn triggers(&self) -> Vec<EventTrigger> {
-            self.events
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|event| {
-                    event
-                        .as_any()
-                        .downcast_ref::<ProcedureEvent>()
-                        .unwrap()
-                        .trigger
-                        .clone()
-                })
-                .collect()
-        }
-    }
-
-    impl EventRecorder for CapturingEventRecorder {
-        fn record(&self, event: Box<dyn Event>) {
-            self.events.lock().unwrap().push(event);
-        }
-
-        fn close(&self) {}
-    }
-
-    #[derive(Debug)]
-    struct TestProcedureEvent;
-
-    impl Event for TestProcedureEvent {
-        fn event_type(&self) -> &str {
-            "test_procedure"
-        }
-
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
     }
 
     #[test]

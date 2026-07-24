@@ -14,13 +14,61 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
+use common_event_recorder::{Event, EventRecorder};
 use snafu::ensure;
 
 use super::*;
-use crate::error;
 use crate::store::poison_store::PoisonStore;
+use crate::{EventTrigger, ProcedureEvent, error};
+
+/// An event recorder that stores captured procedure events for assertions.
+#[derive(Debug, Default)]
+pub struct CapturingEventRecorder {
+    events: Mutex<Vec<Box<dyn Event>>>,
+}
+
+impl CapturingEventRecorder {
+    /// Returns the triggers of captured procedure events.
+    pub fn triggers(&self) -> Vec<EventTrigger> {
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| {
+                event
+                    .as_any()
+                    .downcast_ref::<ProcedureEvent>()
+                    .unwrap()
+                    .trigger
+                    .clone()
+            })
+            .collect()
+    }
+}
+
+impl EventRecorder for CapturingEventRecorder {
+    fn record(&self, event: Box<dyn Event>) {
+        self.events.lock().unwrap().push(event);
+    }
+
+    fn close(&self) {}
+}
+
+/// A minimal procedure event for lifecycle tests.
+#[derive(Debug)]
+pub struct TestProcedureEvent;
+
+impl Event for TestProcedureEvent {
+    fn event_type(&self) -> &str {
+        "test_procedure"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
 
 /// A poison store that uses an in-memory map to store the poison state.
 #[derive(Debug, Default)]
