@@ -478,6 +478,93 @@ mod tests {
     use super::*;
     use crate::manifest::storage::checkpoint::CheckpointMetadata;
 
+    #[rstest::rstest]
+    #[case(CompressionType::Uncompressed)]
+    #[case(CompressionType::Gzip)]
+    #[case(CompressionType::Bzip2)]
+    #[case(CompressionType::Xz)]
+    #[case(CompressionType::Zstd)]
+    #[tokio::test]
+    async fn test_manifest_cache_reopen(
+        #[case] compress_type: CompressionType,
+        #[values(false, true)] legacy_encoded_cache: bool,
+    ) {
+        use common_base::readable_size::ReadableSize;
+
+        let remote_dir = create_temp_dir("manifest_remote");
+        let cache_dir = create_temp_dir("manifest_cache");
+        let remote =
+            ObjectStore::new(Fs::default().root(remote_dir.path().to_str().unwrap())).unwrap();
+        let local =
+            ObjectStore::new(Fs::default().root(cache_dir.path().to_str().unwrap())).unwrap();
+        let cache = ManifestCache::new(local.clone(), ReadableSize::mb(10), None, true).await;
+        let mut store = ManifestObjectStore::new(
+            "region/manifest/",
+            remote.clone(),
+            compress_type,
+            Default::default(),
+            Some(cache.clone()),
+        );
+        let checkpoint = br#"{"checkpoint":true}"#;
+        let delta = br#"{"delta":true}"#;
+        store.save_checkpoint(3, checkpoint).await.unwrap();
+        store.save(4, delta, false).await.unwrap();
+        let checkpoint_key = gen_path("region/manifest/", &checkpoint_file(3), compress_type);
+        let delta_key = gen_path("region/manifest/", &delta_file(4), compress_type);
+        for (key, expected) in [
+            (&checkpoint_key, checkpoint.as_slice()),
+            (&delta_key, delta.as_slice()),
+        ] {
+            assert_eq!(cache.get_file(key).await.unwrap(), expected);
+            if legacy_encoded_cache {
+                // Reproduce files persisted by writers before #10168 was fixed.
+                let encoded = remote.read(key).await.unwrap().to_vec();
+                cache.put_file(key.clone(), encoded).await;
+            }
+        }
+        drop(store);
+        drop(cache);
+
+        let cache = ManifestCache::new(local, ReadableSize::mb(10), None, true).await;
+        assert!(cache.get_file(&checkpoint_key).await.is_some());
+        assert!(cache.get_file(&delta_key).await.is_some());
+        let mut reopened = ManifestObjectStore::new(
+            "region/manifest/",
+            remote.clone(),
+            compress_type,
+            Default::default(),
+            Some(cache.clone()),
+        );
+        // A successful load without the remote object proves the recovered cache hit.
+        remote.delete(&checkpoint_key).await.unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                reopened.load_last_checkpoint().await.unwrap().unwrap(),
+                (3, checkpoint.to_vec())
+            );
+            assert_eq!(
+                reopened.fetch_manifests(4, 5).await.unwrap(),
+                vec![(4, delta.to_vec())]
+            );
+            assert_eq!(cache.get_file(&checkpoint_key).await.unwrap(), checkpoint);
+            assert_eq!(cache.get_file(&delta_key).await.unwrap(), delta);
+        }
+        let mut metadata = new_checkpoint_metadata_with_version(3);
+        metadata.checksum = Some(checkpoint_checksum(checkpoint).wrapping_add(1));
+        assert!(matches!(
+            reopened.checkpoint_storage.load_checkpoint(metadata).await,
+            Err(crate::error::Error::ChecksumMismatch { .. })
+        ));
+        if compress_type == CompressionType::Uncompressed {
+            // The legacy uncompressed fallback can also be served entirely from cache.
+            reopened.set_compress_type(CompressionType::Gzip);
+            assert_eq!(
+                reopened.load_last_checkpoint().await.unwrap().unwrap(),
+                (3, checkpoint.to_vec())
+            );
+        }
+    }
+
     fn new_test_manifest_store() -> ManifestObjectStore {
         new_test_manifest_store_at("/")
     }

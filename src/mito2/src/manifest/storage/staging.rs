@@ -79,7 +79,14 @@ impl StagingBlobStorage {
             self.object_store.info().root(),
             bytes.len()
         );
-        write_and_put_cache(&self.object_store, None, &path, bytes).await?;
+        write_and_put_cache(
+            &self.object_store,
+            None,
+            &path,
+            &bytes,
+            CompressionType::Uncompressed,
+        )
+        .await?;
         Ok(())
     }
 

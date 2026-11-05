@@ -23,9 +23,9 @@ use snafu::ResultExt;
 use store_api::ManifestVersion;
 
 use crate::cache::manifest_cache::ManifestCache;
-use crate::error::{
-    CompressObjectSnafu, DecompressObjectSnafu, OpenDalSnafu, Result, SerdeJsonSnafu, Utf8Snafu,
-};
+#[cfg(test)]
+use crate::error::CompressObjectSnafu;
+use crate::error::{DecompressObjectSnafu, OpenDalSnafu, Result, SerdeJsonSnafu, Utf8Snafu};
 use crate::manifest::storage::size_tracker::Tracker;
 use crate::manifest::storage::utils::{get_from_cache, put_to_cache, write_and_put_cache};
 use crate::manifest::storage::{
@@ -216,22 +216,13 @@ impl<T: Tracker> CheckpointStorage<T> {
         bytes: &[u8],
     ) -> Result<()> {
         let path = self.checkpoint_file_path(version);
-        let data = self
-            .compress_type
-            .encode(bytes)
-            .await
-            .context(CompressObjectSnafu {
-                compress_type: self.compress_type,
-                path: &path,
-            })?;
-        let checkpoint_size = data.len();
         let checksum = checkpoint_checksum(bytes);
-
-        write_and_put_cache(
+        let checkpoint_size = write_and_put_cache(
             &self.object_store,
             self.manifest_cache.as_ref(),
             &path,
-            data,
+            bytes,
+            self.compress_type,
         )
         .await?;
         self.size_tracker.record(version, checkpoint_size as u64);

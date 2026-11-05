@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use common_datasource::compression::CompressionType;
+use common_telemetry::warn;
 use object_store::{Entry, ObjectStore};
 use snafu::ResultExt;
 use store_api::ManifestVersion;
 
 use crate::cache::manifest_cache::ManifestCache;
-use crate::error::{OpenDalSnafu, Result};
+use crate::error::{CompressObjectSnafu, OpenDalSnafu, Result};
+use crate::manifest::storage::file_compress_type;
 
 const CHUNK_SIZE: usize = 64 * 1024 * 1024; // 64MB
 
@@ -25,7 +28,31 @@ const CHUNK_SIZE: usize = 64 * 1024 * 1024; // 64MB
 /// Returns the file data if found in cache, None otherwise.
 pub(crate) async fn get_from_cache(cache: Option<&ManifestCache>, key: &str) -> Option<Vec<u8>> {
     let cache = cache?;
-    cache.get_file(key).await
+    let data = cache.get_file(key).await?;
+    let compress_type = file_compress_type(key);
+    // Older writers cached encoded bytes, while remote reads cached decoded bytes.
+    // Manifest JSON cannot start with any of these compression headers.
+    let encoded = match compress_type {
+        CompressionType::Gzip => data.starts_with(&[0x1f, 0x8b]),
+        CompressionType::Bzip2 => data.starts_with(b"BZh"),
+        CompressionType::Xz => data.starts_with(&[0xfd, b'7', b'z', b'X', b'Z', 0x00]),
+        CompressionType::Zstd => data.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]),
+        CompressionType::Uncompressed => false,
+    };
+    if !encoded {
+        return Some(data);
+    }
+    match compress_type.decode(data.as_slice()).await {
+        Ok(decoded) => {
+            put_to_cache(Some(cache), key.to_string(), &decoded).await;
+            Some(decoded)
+        }
+        Err(error) => {
+            warn!(error; "Failed to decode legacy cached manifest {}, retrying object storage", key);
+            cache.remove(key).await;
+            None
+        }
+    }
 }
 
 /// Puts a manifest file into cache.
@@ -44,33 +71,30 @@ pub(crate) async fn remove_from_cache(cache: Option<&ManifestCache>, key: &str) 
     cache.remove(key).await
 }
 
-/// Writes data to object store and puts it into cache.
+/// Writes encoded bytes to object storage and caches the decoded content.
+/// Returns the stored byte length.
 pub(crate) async fn write_and_put_cache(
     object_store: &ObjectStore,
     cache: Option<&ManifestCache>,
     path: &str,
-    data: Vec<u8>,
-) -> Result<()> {
-    // Clone data for cache before writing, only if cache is enabled.
-    let cache_data = if cache.is_some() {
-        Some(data.clone())
-    } else {
-        None
-    };
-
-    // Write to object store
+    bytes: &[u8],
+    compress_type: CompressionType,
+) -> Result<usize> {
+    let data = compress_type
+        .encode(bytes)
+        .await
+        .context(CompressObjectSnafu {
+            compress_type,
+            path,
+        })?;
+    let stored_size = data.len();
     object_store
         .write_with(path, data)
         .chunk(CHUNK_SIZE) // 64MB
         .await
         .context(OpenDalSnafu)?;
-
-    // Put to cache if we cloned the data
-    if let Some(data) = cache_data {
-        put_to_cache(cache, path.to_string(), &data).await;
-    }
-
-    Ok(())
+    put_to_cache(cache, path.to_string(), bytes).await;
+    Ok(stored_size)
 }
 
 /// Sorts the manifest files.
