@@ -1,0 +1,41 @@
+src/sketch/Cargo.toml
+  s_343b154e22d934::t_58cb898f4090bb 17
+src/sketch/src/column.rs
+  s_343b154e22d934::t_2d5b7af32e8ad6 17-19,100-163,173,188-222,233,241,246,266,321,338-339,346-347
+src/sketch/src/column/tests.rs
+  s_343b154e22d934::t_f5a8655b18f208 71,419,424,440-441
+src/sketch/src/compaction_test.rs
+  s_343b154e22d934::t_73f51175800359 37,101,153-186,189-217,219,223,361,494,506-673
+src/sketch/src/error.rs
+  s_343b154e22d934::t_6917b0b20e6930 78-85,108-110
+src/sketch/src/lib.rs
+  s_343b154e22d934::t_4ee0bac7f624bd 31-32
+src/sketch/src/options.rs
+  s_343b154e22d934::t_9af7e33f277b56 108
+src/sketch/src/provider.rs
+  s_343b154e22d934::t_9d22f5434bf20f 14-15,30,39,47,144-151,154-158,322,324,340-347,349-367,384,418,449-456,459,477,559,562,569-572
+src/sketch/src/provider/window.rs
+  s_343b154e22d934::t_86aa25a696717a 1-697
+src/sketch/src/time_bucket.rs
+  s_343b154e22d934::t_a63627c664f93f 1-105
+tests/compatibility/sketch/README.md
+  s_343b154e22d934::t_c4581c4cc1a64a 74-81
+tests/compatibility/sketch/time-directory-v1.json
+  s_343b154e22d934::t_ee58f20ce38be9 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0419a0a3a994eede92667bde9af5a635753b9e3c",
+  "prompts": {},
+  "sessions": {
+    "s_343b154e22d934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c20-9a17-7173-aaff-05fa38f479d2",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}
