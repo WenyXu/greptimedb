@@ -1,0 +1,30 @@
+src/puffin/src/puffin_manager/tests.rs
+  s_343b154e22d934::t_f7e4d12cf7eff6 749-755,758-835
+  s_343b154e22d934::t_9008be768b59a4 836
+src/puffin/src/puffin_manager/fs_puffin_manager/reader.rs
+  s_343b154e22d934::t_99681fe17a90c0 212-214
+src/mito2/src/sst/index/sketch/provider/window.rs
+  s_343b154e22d934::t_99681fe17a90c0 51,243-251,260,332-333,345
+src/puffin/src/file_metadata.rs
+  s_343b154e22d934::t_99681fe17a90c0 37-43,45-47,63-76,78-79,81-91
+  s_343b154e22d934::t_320e212e2ac4fa 44
+  s_343b154e22d934::t_0b54a9a802ad4c 77
+  s_343b154e22d934::t_57880492b27901 80
+  s_343b154e22d934::t_74ef27698a26ae 92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "76c7ea4117bed17a8733bfd421376acd7fef76fd",
+  "prompts": {},
+  "sessions": {
+    "s_343b154e22d934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c20-9a17-7173-aaff-05fa38f479d2",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}
