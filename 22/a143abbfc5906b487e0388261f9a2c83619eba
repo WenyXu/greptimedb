@@ -1,0 +1,39 @@
+src/sketch/Cargo.toml
+  s_343b154e22d934::t_7641de26af37e9 17,24,27,36,38
+src/sketch/src/algorithm.rs
+  s_343b154e22d934::t_1308cbcbd499f8 271-285,291-295
+src/sketch/src/column.rs
+  s_343b154e22d934::t_81bf7f23a76a6a 114-137,160-167,200,288-301
+src/sketch/src/error.rs
+  s_343b154e22d934::t_51ff8338ebb942 45-51,114
+src/sketch/src/lib.rs
+  s_343b154e22d934::t_553ec9b875305b 15,17
+src/sketch/src/metrics.rs
+  s_343b154e22d934::t_58bd53f17c25b7 23-56
+src/sketch/src/provider.rs
+  s_343b154e22d934::t_e55a924b48e99c 16-17,48,71,98-99,130-134,140-143,159-168,387-405,690
+src/sketch/src/provider/window.rs
+  s_343b154e22d934::t_d4400f51a73d7f 18,23-24,26,28-29,40,43-44,48,50,55,77-85,95-121,126-413,425-432,949-1013
+src/sketch/src/provider_test.rs
+  s_343b154e22d934::t_471eac0f2018b7 1-706
+src/sketch/src/tests.rs
+  s_343b154e22d934::t_3e7a864543780f 57-59
+src/sketch/src/time_bucket.rs
+  s_343b154e22d934::t_9ab7c84b9c5575 49-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "22a143abbfc5906b487e0388261f9a2c83619eba",
+  "prompts": {},
+  "sessions": {
+    "s_343b154e22d934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c20-9a17-7173-aaff-05fa38f479d2",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}
