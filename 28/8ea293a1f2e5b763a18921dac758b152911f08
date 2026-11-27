@@ -1,0 +1,47 @@
+src/sketch/Cargo.toml
+  s_343b154e22d934::t_dbd23732a6056e 1-19
+src/sketch/src/algorithm.rs
+  s_343b154e22d934::t_055cf90f4a42b4 1-487
+src/sketch/src/algorithm/tests.rs
+  s_343b154e22d934::t_4806a50d05e284 1-296
+src/sketch/src/error.rs
+  s_343b154e22d934::t_41235bd3c17cce 1-66
+src/sketch/src/format.rs
+  s_343b154e22d934::t_df60b5cd45c3e5 1-97
+src/sketch/src/format/tests.rs
+  s_343b154e22d934::t_793bc4cdebf6e2 1-230
+src/sketch/src/hll.rs
+  s_343b154e22d934::t_02d91dfa2cb14d 1-101
+src/sketch/src/hll/tests.rs
+  s_343b154e22d934::t_189d5e7da010c0 1-66
+src/sketch/src/hll/wire.rs
+  s_343b154e22d934::t_243b7847c31ab1 1-171
+src/sketch/src/kll.rs
+  s_343b154e22d934::t_fdf622135b907c 1-58
+src/sketch/src/kll/tests.rs
+  s_343b154e22d934::t_ee73a4633b1304 1-68
+src/sketch/src/lib.rs
+  s_343b154e22d934::t_476f7ce1618477 1-21
+src/sketch/src/mg.rs
+  s_343b154e22d934::t_97b97905da1d1d 1-155
+src/sketch/src/mg/tests.rs
+  s_343b154e22d934::t_4d9301466ebab2 1-79
+tests/compatibility/sketch/README.md
+  s_343b154e22d934::t_92dd3dddfe0536 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "288ea293a1f2e5b763a18921dac758b152911f08",
+  "prompts": {},
+  "sessions": {
+    "s_343b154e22d934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c20-9a17-7173-aaff-05fa38f479d2",
+        "model": "unknown"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}
