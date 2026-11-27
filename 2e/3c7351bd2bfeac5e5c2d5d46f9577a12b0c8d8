@@ -1,0 +1,154 @@
+src/mito2/src/sst/index/sketch/kll.rs
+  s_343b154e22d934::t_f470483209d300 1-61
+src/mito2/src/worker/handle_create.rs
+  s_343b154e22d934::t_96d4e8e538a726 25
+  s_343b154e22d934::t_8e4bff61d4ba08 62-66
+src/mito2/src/sst/index/sketch/format/tests.rs
+  s_343b154e22d934::t_f470483209d300 1-391
+src/mito2/src/sst/index/handler.rs
+  s_343b154e22d934::t_e5d35efcee41e2 92-93,96-97
+src/mito2/src/sst/index/sketch/column/tests.rs
+  s_343b154e22d934::t_f470483209d300 1-458
+src/mito2/src/sst/index/sketch/format.rs
+  s_343b154e22d934::t_f470483209d300 1-25,29-232
+  s_343b154e22d934::t_8e4bff61d4ba08 26-28
+src/mito2/src/sst/index/sketch/legacy/tests.rs
+  s_343b154e22d934::t_f470483209d300 1-101
+src/mito2/src/sst/index/indexer/abort.rs
+  s_343b154e22d934::t_e5d35efcee41e2 27,39
+src/mito2/src/sst/index/sketch/kll/tests.rs
+  s_343b154e22d934::t_f470483209d300 1-71
+src/mito2/src/sst/index/sketch/provider_test.rs
+  s_343b154e22d934::t_e5d35efcee41e2 159
+  s_343b154e22d934::t_f470483209d300 1-18,21-22,26-29,31-158,160-179,183-713
+  s_343b154e22d934::t_8e4bff61d4ba08 19-20,23-25,30,180-182
+src/mito2/src/engine/create_test.rs
+  s_343b154e22d934::t_96d4e8e538a726 53,55,84
+src/mito2/src/sst/index/sketch/compaction_test.rs
+  s_343b154e22d934::t_8e4bff61d4ba08 26-28
+  s_343b154e22d934::t_f470483209d300 1-22,24-25,29-70,72-85,87,91-511,513-668
+  s_343b154e22d934::t_e5d35efcee41e2 23,71,86,88-90,512
+src/mito2/src/sst/index/sketch/legacy.rs
+  s_343b154e22d934::t_f470483209d300 1-114
+src/mito2/src/sst/index/sketch/options/tests.rs
+  s_343b154e22d934::t_f470483209d300 1-14,16-193
+  s_343b154e22d934::t_8e4bff61d4ba08 15
+src/mito2/src/sst/index/sketch/provider/window.rs
+  s_343b154e22d934::t_f470483209d300 1-25,31-32,34-59,63-183,187-1100
+  s_343b154e22d934::t_8e4bff61d4ba08 26-30,33,60-62,184-186
+src/mito2/src/sst/index/indexer/update.rs
+  s_343b154e22d934::t_e5d35efcee41e2 46,75
+src/mito2/src/sst/index.rs
+  s_343b154e22d934::t_e5d35efcee41e2 192,297,425,432,451,479-480,594,604,627,1198,2246,2267-2268,2270,2291,2293,2298,2406,2441,2446,2453,2540,2672,2722-2723,2864,2924,2926,2940-2941,2952,2979,2981,2983,2985,3107,4090
+  s_343b154e22d934::t_ae6d774b7203b1 29
+  s_343b154e22d934::t_96d4e8e538a726 2098,2202,2639,2775,2859
+  s_343b154e22d934::t_8e4bff61d4ba08 2061-2067,2689-2692,2730-2741,2975,3132-3138,3167-3176,3193-3202,3219-3228,3257-3263,3285-3291,3313-3319,3348-3354,4356-4362
+src/mito2/src/compaction/multi_region/source.rs
+  s_343b154e22d934::t_8e4bff61d4ba08 42-43
+  s_343b154e22d934::t_96d4e8e538a726 211
+  s_343b154e22d934::t_e5d35efcee41e2 231
+src/mito2/src/compaction/multi_region/tests.rs
+  s_343b154e22d934::t_8e4bff61d4ba08 65
+  s_343b154e22d934::t_e5d35efcee41e2 2731,3084
+tests/compatibility/sketch/README.md
+  s_343b154e22d934::t_105f56313e41ee 22,35,44,65,80
+src/mito2/src/sst/index/sketch/mg/tests.rs
+  s_343b154e22d934::t_f470483209d300 1-82
+src/mito2/src/sst/index/sketch/error.rs
+  s_343b154e22d934::t_15e80ce67518bd 123
+  s_343b154e22d934::t_f470483209d300 1-122,124-133
+src/datatypes/src/schema/sketch.rs
+  s_343b154e22d934::t_e897fe8e7d1b47 1,3-5,7-13
+src/mito2/AGENTS.md
+  s_343b154e22d934::t_105f56313e41ee 98-100
+src/mito2/src/worker/handle_rebuild_index.rs
+  s_343b154e22d934::t_96d4e8e538a726 39-41,159
+  s_343b154e22d934::t_8e4bff61d4ba08 42,160-165,167-171,672,687-691,800-804,875-879,928-932,941-945
+  s_343b154e22d934::t_e5d35efcee41e2 62-63,730,848
+src/mito2/src/sst/index/indexer/finish.rs
+  s_343b154e22d934::t_e5d35efcee41e2 51
+src/mito2/src/sst/index/sketch/metrics.rs
+  s_343b154e22d934::t_f470483209d300 1-15,17-18,20,24-59
+  s_343b154e22d934::t_e5d35efcee41e2 16,19,21-23
+src/mito2/src/sst/index/sketch/tests.rs
+  s_343b154e22d934::t_f470483209d300 1-23,25-32,35-50,52-62
+  s_343b154e22d934::t_e5d35efcee41e2 24,33-34,51
+src/mito2/src/sst/index/sketch/hll.rs
+  s_343b154e22d934::t_f470483209d300 1-104
+src/mito2/src/worker.rs
+  s_343b154e22d934::t_8e4bff61d4ba08 758
+  s_343b154e22d934::t_96d4e8e538a726 98,760-764
+src/mito2/src/engine/index_build_test.rs
+  s_343b154e22d934::t_96d4e8e538a726 2910
+  s_343b154e22d934::t_e5d35efcee41e2 2653,2711,2804
+  s_343b154e22d934::t_8e4bff61d4ba08 61,1198
+  s_343b154e22d934::t_15e80ce67518bd 1206,1220
+src/mito2/src/sst/index/kind.rs
+  s_343b154e22d934::t_e5d35efcee41e2 19,28-29,32,34,43,73,83-85,89-91
+src/mito2/src/sst/index/sketch/mg.rs
+  s_343b154e22d934::t_f470483209d300 1-158
+src/mito2/src/sst/index/sketch/column.rs
+  s_343b154e22d934::t_f470483209d300 1-22,24-432
+  s_343b154e22d934::t_8e4bff61d4ba08 23
+src/mito2/src/sst/index/registry.rs
+  s_343b154e22d934::t_96d4e8e538a726 17-18,54-56,60-66,77,83-85,102,126,193
+  s_343b154e22d934::t_e5d35efcee41e2 172,294,296,304,306,358,372,380-381,424,472-473,518-520,540,571-572,595,623,641
+  s_343b154e22d934::t_ae6d774b7203b1 24-26
+  s_343b154e22d934::t_8e4bff61d4ba08 36-37,57-59,78-82,86,88,90,95,208-209,269-270,512-516,535-539,588-592
+src/mito2/src/sst/index/sketch/time_bucket.rs
+  s_343b154e22d934::t_f470483209d300 1-107,112-117,120-126
+  s_343b154e22d934::t_8e4bff61d4ba08 108-111,118-119
+src/mito2/src/compaction/compactor.rs
+  s_343b154e22d934::t_8e4bff61d4ba08 168-170,1255,1593-1597
+  s_343b154e22d934::t_e5d35efcee41e2 1379
+  s_343b154e22d934::t_96d4e8e538a726 63-65,164-167
+  s_343b154e22d934::t_15e80ce67518bd 2164,2230-2233,2241
+src/mito2/src/sst/index/sketch/hll/tests.rs
+  s_343b154e22d934::t_f470483209d300 1-123
+src/mito2/src/sst/index/sketch/hll/wire.rs
+  s_343b154e22d934::t_f470483209d300 1-174
+src/mito2/src/sst/index/sketch/algorithm/tests.rs
+  s_343b154e22d934::t_f470483209d300 1-299
+src/mito2/Cargo.toml
+  s_343b154e22d934::t_f470483209d300 27,54,63,96
+  s_343b154e22d934::t_105f56313e41ee 12
+src/mito2/src/sst/index/sketch/options.rs
+  s_343b154e22d934::t_f470483209d300 1-27,29-113
+  s_343b154e22d934::t_e5d35efcee41e2 28
+src/mito2/src/sst/index/sketch.rs
+  s_343b154e22d934::t_f470483209d300 1-35
+src/mito2/src/sst/index/sketch/algorithm.rs
+  s_343b154e22d934::t_8e4bff61d4ba08 23,29-31
+  s_343b154e22d934::t_e5d35efcee41e2 67,69-71,184
+  s_343b154e22d934::t_f470483209d300 1-22,24-28,32-66,68,72-183,185-537
+src/mito2/src/sst/index/sketch/provider.rs
+  s_343b154e22d934::t_f470483209d300 1-27,36-60,64-96,98-115,117-606,608-631,633-704,706-956
+  s_343b154e22d934::t_8e4bff61d4ba08 28-35,632,705
+  s_343b154e22d934::t_e5d35efcee41e2 61-63,97,116,607
+Cargo.lock
+  s_b7d7dd5280bd00::t_a7bfb7c6159554 4609-4613,8846,8874,8883,15247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2e3c7351bd2bfeac5e5c2d5d46f9577a12b0c8d8",
+  "prompts": {},
+  "sessions": {
+    "s_343b154e22d934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c20-9a17-7173-aaff-05fa38f479d2",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    },
+    "s_b7d7dd5280bd00": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c5e7-c137-7441-95b6-d8a603300cd9",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}
