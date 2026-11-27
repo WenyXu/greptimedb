@@ -1,0 +1,43 @@
+src/mito2/src/worker/handle_rebuild_index.rs
+  s_343b154e22d934::t_de9f9ee4f3d1b1 30-31,917-918
+  s_343b154e22d934::t_debca59fe36706 151,869,915,930
+src/mito2/src/sst/index/sketch/creator/window.rs
+  s_343b154e22d934::t_5154ac5631f9bc 1-152,164-733,735-1104
+  s_343b154e22d934::t_de9f9ee4f3d1b1 153-163,734
+src/mito2/src/sst/index/handler/builtin.rs
+  s_343b154e22d934::t_5154ac5631f9bc 20,41,50,54-55,58-59,70
+  s_343b154e22d934::t_de9f9ee4f3d1b1 56-57
+src/mito2/src/sst/index/handler/builtin/sketch.rs
+  s_343b154e22d934::t_de9f9ee4f3d1b1 24-26,28-32,48-50
+  s_343b154e22d934::t_5154ac5631f9bc 1-23,27,33-47,51-216
+src/mito2/src/sst/index/sketch/reuse_test.rs
+  s_343b154e22d934::t_5154ac5631f9bc 1-713
+src/mito2/src/sst/index/registry.rs
+  s_343b154e22d934::t_debca59fe36706 32-34,116,136,199
+  s_343b154e22d934::t_5154ac5631f9bc 59
+src/mito2/src/sst/index/sketch/compaction_test.rs
+  s_343b154e22d934::t_5154ac5631f9bc 634
+src/mito2/src/sst/index/sketch/creator.rs
+  s_343b154e22d934::t_de9f9ee4f3d1b1 29
+  s_343b154e22d934::t_5154ac5631f9bc 1-28,30-763
+src/mito2/src/sst/index/sketch/tests.rs
+  s_343b154e22d934::t_5154ac5631f9bc 61
+src/mito2/src/sst/index/sketch.rs
+  s_343b154e22d934::t_5154ac5631f9bc 20,27,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a862f49d909b8bdb93e4c7ac3946298e0e3ae27d",
+  "prompts": {},
+  "sessions": {
+    "s_343b154e22d934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c20-9a17-7173-aaff-05fa38f479d2",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}
