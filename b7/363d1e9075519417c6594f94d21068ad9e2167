@@ -1,0 +1,33 @@
+src/sketch/Cargo.toml
+  s_343b154e22d934::t_c7f3de1cf2c0af 11-12,14,20,24,26,33-34
+src/sketch/src/compaction_test.rs
+  s_343b154e22d934::t_fbe98b8bf1567f 1-461
+src/sketch/src/error.rs
+  s_343b154e22d934::t_f62d0bcc661826 53-60,101-102
+src/sketch/src/lib.rs
+  s_343b154e22d934::t_bfcff6b5c51ea1 24,29-30
+src/sketch/src/options.rs
+  s_343b154e22d934::t_fac6237b89b9e7 18,23,38-49,80-93
+src/sketch/src/options/tests.rs
+  s_343b154e22d934::t_f33f120098eb49 168-190
+src/sketch/src/provider.rs
+  s_343b154e22d934::t_203e6686143649 1-951
+src/sketch/src/tests.rs
+  s_343b154e22d934::t_cd0b5f54bfae6e 12-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b7363d1e9075519417c6594f94d21068ad9e2167",
+  "prompts": {},
+  "sessions": {
+    "s_343b154e22d934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c20-9a17-7173-aaff-05fa38f479d2",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}
