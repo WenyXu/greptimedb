@@ -1,0 +1,30 @@
+src/mito2/src/sst/index/sketch/reuse_test.rs
+  s_343b154e22d934::t_8692bc3071d744 63-100,105
+  s_b42cba56c4911e::t_14a268b3fe4635 101-104,106-115
+src/mito2/src/sst/index/sketch.rs
+  s_343b154e22d934::t_98e00ee2294011 17-23,43-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "daa2f50ace6ae921adc327b8e9cc5b902b014b5d",
+  "prompts": {},
+  "sessions": {
+    "s_343b154e22d934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c20-9a17-7173-aaff-05fa38f479d2",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    },
+    "s_b42cba56c4911e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a207af-50d0-7c80-bdbc-8fe4eee39295",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}
