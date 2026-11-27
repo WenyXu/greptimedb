@@ -1,0 +1,55 @@
+src/sketch/Cargo.toml
+  s_343b154e22d934::t_66ff7dad06deef 16,18-19,22,24-27
+src/sketch/src/algorithm.rs
+  s_343b154e22d934::t_55a406b8eceba6 22,61-69,178-182,377-386
+src/sketch/src/column.rs
+  s_343b154e22d934::t_6e4752ec508ca0 1-307
+src/sketch/src/column/tests.rs
+  s_343b154e22d934::t_afd2a9b4e719ba 1-461
+src/sketch/src/error.rs
+  s_343b154e22d934::t_ab9a3e2de59485 45-69,79-87,92-97
+src/sketch/src/format.rs
+  s_343b154e22d934::t_a51bc007370a66 12,17-18,23,25,27-30,34-98,152,166-227
+src/sketch/src/format/tests.rs
+  s_343b154e22d934::t_65037cebe6f02a 231-388
+src/sketch/src/hll/tests.rs
+  s_343b154e22d934::t_cc406daf0dfd63 26-79
+src/sketch/src/legacy.rs
+  s_343b154e22d934::t_3684163bfc419e 1-111
+src/sketch/src/legacy/tests.rs
+  s_343b154e22d934::t_68d76ec8726ec3 1-98
+src/sketch/src/lib.rs
+  s_343b154e22d934::t_ea885e2f047e8c 15,17,20-22,24-26
+src/sketch/src/metrics.rs
+  s_343b154e22d934::t_caa6fe707607b3 1-22
+src/sketch/src/options.rs
+  s_343b154e22d934::t_08782c853d6f51 1-84
+src/sketch/src/options/tests.rs
+  s_343b154e22d934::t_9d240240526019 1-167
+src/sketch/src/tests.rs
+  s_343b154e22d934::t_bbb30dc353f0f8 1-53
+tests/compatibility/sketch/README.md
+  s_343b154e22d934::t_5e3d59b9d2b38f 31-73
+tests/compatibility/sketch/hll-v2.properties.json
+  s_343b154e22d934::t_617f0871a190aa 1-18
+tests/compatibility/sketch/kll-v2.properties.json
+  s_343b154e22d934::t_c8cc38673f538b 1-14
+tests/compatibility/sketch/mg-v2.properties.json
+  s_343b154e22d934::t_8b988effa55bb7 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "aaea0759d2888156276edf5bc679d8ff291a8ef3",
+  "prompts": {},
+  "sessions": {
+    "s_343b154e22d934": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c20-9a17-7173-aaff-05fa38f479d2",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "WenyXu <wenymedia@gmail.com>"
+    }
+  }
+}
